@@ -94,10 +94,10 @@ void main() {
       expect(detectPlatform('https://v.kuaishou.com/abc')?.key, 'kuaishou');
       expect(detectPlatform('https://zhuanlan.zhihu.com/p/123')?.key, 'zhihu');
 
-      // 明确**不做**的平台，识别不出来才是对的 ——
-      // 不能假装支持，然后在解析时才失败。
-      expect(detectPlatform('https://www.toutiao.com/article/123/'), isNull);
-      expect(detectPlatform('https://v.youku.com/v_show/id_x.html'), isNull);
+      // v0.0.5 起头条/优酷都支持了（走通用适配器），所以这里改测**真的不做**的：
+      // 国外平台和电商链接不在范围内，识别不出来才是对的。
+      expect(detectPlatform('https://www.youtube.com/watch?v=abc'), isNull);
+      expect(detectPlatform('https://item.taobao.com/item.htm?id=123'), isNull);
     });
   });
 
@@ -233,9 +233,15 @@ void main() {
     // 这组测试是有来历的：快手/微博/知乎做完后，首页那排平台标签还是
     // 写死的旧列表，用户装上后以为只支持三个平台。
     // 所以把「界面列表」和「能解析的平台」绑在一起断言，让它们不能再脱节。
-    test('界面上展示的平台数 = 解析器支持的平台数 = 6', () {
-      expect(kPlatforms.length, 6);
-      expect(LocalRegistry.all.length, 6);
+    test('界面上展示的平台数 = 解析器支持的平台数', () {
+      // 【为什么不再写死 6】v0.0.5 起加了 12 个「通用适配器」平台（西瓜/头条/
+      // 好看/微视/豆瓣/贴吧/腾讯视频/爱奇艺/优酷/芒果/虎牙/斗鱼）。
+      // 写死数字的话每加一个平台都要改测试，反而容易漏。
+      // 这里只断言**两边数量一致** —— 那才是真正要防的脱节。
+      expect(kPlatforms.length, LocalRegistry.all.length,
+          reason: '界面列出的平台必须和解析器支持的完全一致');
+      expect(kPlatforms.length, greaterThanOrEqualTo(6),
+          reason: '六个核心平台必须一直在');
     });
 
     test('两个列表的 key 必须一一对应', () {
@@ -386,8 +392,9 @@ void main() {
     expect(await s.tryAutoParseFromClipboard(), isFalse);
     expect(s.rawText, '');
 
-    // 明确不做的平台不该被识别（头条已确认不做）
-    clip = 'https://www.toutiao.com/article/123456/';
+    // 真的不在范围的平台不该被识别（国外平台 / 电商）——
+    // 注意别再拿头条举例了，v0.0.5 起它已经支持了。
+    clip = 'https://www.youtube.com/watch?v=abc123';
     expect(await s.tryAutoParseFromClipboard(), isFalse);
     expect(s.rawText, '');
   });
@@ -455,7 +462,7 @@ void main() {
       expect(find.text(p.name), findsWidgets);
     }
     // 六个平台都要出现在首页标签里 —— 这条是防「解析支持了但界面没更新」
-    expect(kPlatforms.length, 6);
+    expect(kPlatforms.length, greaterThanOrEqualTo(6));
     expect(find.text('快手'), findsWidgets);
     expect(find.text('微博'), findsWidgets);
     expect(find.text('知乎'), findsWidgets);

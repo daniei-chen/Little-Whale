@@ -83,6 +83,74 @@ const kPlatforms = <PlatformMeta>[
     hosts: ['zhihu.com', 'zhimg.com'],
     keywords: ['知乎', 'zhihu'],
   ),
+  // ---- 下面这些走「通用适配器」（见 lib/local/generic.dart）----
+  //
+  // 【为什么要分开列】它们的网页实测**全是 SPA**：首页 HTML 只有几 KB 空壳，
+  // 数据全靠 JS 渲染。直接 HTTP 抓什么都拿不到，只能靠内置 WebView
+  // 把页面真的跑起来再读 DOM。
+  //
+  // 代价是：**拿不到无水印原图，也识别不了动图** ——
+  // 平台页面上给的就是带水印的流。这是「先保证能用」的取舍。
+  PlatformMeta(
+    key: 'ixigua', name: '西瓜视频', short: '西',
+    color: Color(0xFF1E90FF), soft: Color(0x121E90FF),
+    hosts: ['ixigua.com'], keywords: ['西瓜视频', 'ixigua'],
+  ),
+  PlatformMeta(
+    key: 'toutiao', name: '今日头条', short: '头',
+    color: Color(0xFFF04142), soft: Color(0x12F04142),
+    hosts: ['toutiao.com'], keywords: ['今日头条', '头条'],
+  ),
+  PlatformMeta(
+    key: 'haokan', name: '好看视频', short: '好',
+    color: Color(0xFF2932E1), soft: Color(0x122932E1),
+    hosts: ['haokan.baidu.com'], keywords: ['好看视频', 'haokan'],
+  ),
+  PlatformMeta(
+    key: 'weishi', name: '微视', short: '微',
+    color: Color(0xFF12B7F5), soft: Color(0x1212B7F5),
+    hosts: ['weishi.qq.com'], keywords: ['微视', 'weishi'],
+  ),
+  PlatformMeta(
+    key: 'douban', name: '豆瓣', short: '豆',
+    color: Color(0xFF2E963D), soft: Color(0x122E963D),
+    hosts: ['douban.com'], keywords: ['豆瓣', 'douban'],
+  ),
+  PlatformMeta(
+    key: 'tieba', name: '百度贴吧', short: '贴',
+    color: Color(0xFF3385FF), soft: Color(0x123385FF),
+    hosts: ['tieba.baidu.com'], keywords: ['贴吧', 'tieba'],
+  ),
+  PlatformMeta(
+    key: 'qqvideo', name: '腾讯视频', short: '腾',
+    color: Color(0xFF1BAAFB), soft: Color(0x121BAAFB),
+    hosts: ['v.qq.com'], keywords: ['腾讯视频'],
+  ),
+  PlatformMeta(
+    key: 'iqiyi', name: '爱奇艺', short: '爱',
+    color: Color(0xFF00BE06), soft: Color(0x1200BE06),
+    hosts: ['iqiyi.com'], keywords: ['爱奇艺', 'iqiyi'],
+  ),
+  PlatformMeta(
+    key: 'youku', name: '优酷', short: '优',
+    color: Color(0xFF1B9EF5), soft: Color(0x121B9EF5),
+    hosts: ['youku.com'], keywords: ['优酷', 'youku'],
+  ),
+  PlatformMeta(
+    key: 'mgtv', name: '芒果TV', short: '芒',
+    color: Color(0xFFFF7300), soft: Color(0x12FF7300),
+    hosts: ['mgtv.com'], keywords: ['芒果', 'mgtv'],
+  ),
+  PlatformMeta(
+    key: 'huya', name: '虎牙', short: '虎',
+    color: Color(0xFFFF9F00), soft: Color(0x12FF9F00),
+    hosts: ['huya.com'], keywords: ['虎牙', 'huya'],
+  ),
+  PlatformMeta(
+    key: 'douyu', name: '斗鱼', short: '斗',
+    color: Color(0xFFFF5D23), soft: Color(0x12FF5D23),
+    hosts: ['douyu.com'], keywords: ['斗鱼', 'douyu'],
+  ),
 ];
 
 /// 从一段分享文案里抓出第一个可用的链接。
