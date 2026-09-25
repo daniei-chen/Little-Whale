@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/icon.png" width="118" alt="小鲸鱼">
+  <img src="https://raw.githubusercontent.com/daniei-chen/Little-Whale/main/docs/icon.png" width="118" alt="小鲸鱼">
   <h1>小鲸鱼</h1>
   <p><b>粘贴分享链接，保存无水印原片</b></p>
   <p>
@@ -7,16 +7,16 @@
     <sub>全程在手机本地解析 · 不上传链接 · 不需要服务器</sub>
   </p>
   <p>
-    <a href="../../actions/workflows/ci.yml"><img src="../../actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/daniei-chen/Little-Whale/actions/workflows/ci.yml"><img src="https://github.com/daniei-chen/Little-Whale/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   </p>
 </div>
 
 ---
 
 <div align="center">
-  <img src="docs/screenshot-home.png" width="280" alt="首页">
+  <img src="https://raw.githubusercontent.com/daniei-chen/Little-Whale/main/docs/screenshot-home.png" width="280" alt="首页">
   &nbsp;&nbsp;
-  <img src="docs/screenshot-result.png" width="280" alt="解析结果">
+  <img src="https://raw.githubusercontent.com/daniei-chen/Little-Whale/main/docs/screenshot-result.png" width="280" alt="解析结果">
   <br>
   <sub>左：首页 &nbsp;|&nbsp; 右：图文作品解析后逐张勾选</sub>
 </div>
@@ -25,7 +25,7 @@
 
 ## 下载
 
-**从本仓库的 [Releases](../../releases) 页面下载最新版 APK。**
+**从本仓库的 [Releases](https://github.com/daniei-chen/Little-Whale/releases) 页面下载最新版 APK。**
 
 > 国内直连 GitHub 的下载域名不稳定，如果下不动，请走 App 内的更新提示，
 > 或联系分发者获取直连地址。
