@@ -313,13 +313,14 @@ class BilibiliLocalPlatform extends LocalPlatform {
       }
     }
 
-    final desc = (md is Map ? (md['desc'] ?? '') : '').toString();
+    final title = _opusTitle(major ?? const {}, md ?? const {}, item);
 
     return LocalResult(
       platform: key,
       platformName: name,
       type: 'images',
-      title: desc.trim().isEmpty ? 'B站动态' : desc.trim(),
+      // 尽量别退到「B站动态」—— 用户看到这种标题分不清是哪条
+      title: title.isNotEmpty ? title : 'B站动态',
       author: author,
       cover: images.first.url,
       referer: referer,
@@ -334,10 +335,75 @@ class BilibiliLocalPlatform extends LocalPlatform {
     var u = raw.trim();
     if (u.startsWith('//')) u = 'https:$u';
     if (!u.startsWith('http')) return '';
+    // 接口有时候给 http（new_dyn 那一批就是）。必须升到 https ——
+    // 否则 Android 会拦明文请求，表现是「解析出来了但图下不来」。
+    if (u.startsWith('http://')) u = 'https://${u.substring(7)}';
     // `xxx.jpg@1080w_1c.webp` → `xxx.jpg`（去掉 @ 后缀即原图）
     final at = u.indexOf('@');
     if (at > 0) u = u.substring(0, at);
     return u;
+  }
+
+  /// 从动态数据里取标题。
+  ///
+  /// 新版 opus 把正文放在 `major.opus.title` / `major.opus.summary.text`，
+  /// 老版放在 `module_dynamic.desc`（可能是字符串，也可能是 `{text: ...}`）。
+  /// 都不给才退回通用标题 —— 用户看到「B站动态」是分不清哪条的。
+  String _opusTitle(Map<dynamic, dynamic> major, Map<dynamic, dynamic> md, Map item) {
+    String pick(dynamic v) {
+      if (v is String) return v.trim();
+      if (v is Map) return (v['text'] ?? '').toString().trim();
+      return '';
+    }
+
+    final opus = major['opus'];
+    if (opus is Map) {
+      final t = pick(opus['title']);
+      if (t.isNotEmpty) return t;
+      final s = pick(opus['summary']);
+      if (s.isNotEmpty) return s;
+    }
+
+    final desc = pick(md['desc']);
+    if (desc.isNotEmpty) return desc;
+
+    final basic = item['basic'];
+    if (basic is Map) {
+      final t = pick(basic['title']);
+      if (t.isNotEmpty) return t;
+      final s = pick(basic['summary']);
+      if (s.isNotEmpty) return s;
+    }
+
+    // 还有的放在 modules[*].module_content.paragraphs[].text.nodes[].text
+    final mods = item['modules'];
+    if (mods is Map) {
+      for (final k in mods.keys) {
+        final m = mods[k];
+        if (m is! Map) continue;
+        final mc = m['module_content'] ?? m['module_dynamic'];
+        if (mc is Map) {
+          final t = pick(mc['desc']);
+          if (t.isNotEmpty) return t;
+          final ps = mc['paragraphs'];
+          if (ps is List) {
+            final buf = StringBuffer();
+            for (final p in ps) {
+              final txt = p is Map ? (p['text'] ?? '') : '';
+              final nodes = (txt is Map ? txt['nodes'] : null);
+              if (nodes is List) {
+                for (final n in nodes) {
+                  if (n is Map) buf.write((n['text'] ?? '').toString());
+                }
+              }
+            }
+            final s = buf.toString().trim();
+            if (s.isNotEmpty) return s.length > 60 ? '${s.substring(0, 60)}…' : s;
+          }
+        }
+      }
+    }
+    return '';
   }
 
   /* ------------------------------------------------------------------ */

@@ -76,6 +76,31 @@ void main() {
     expect(ok.type, contains('image'));
   }, timeout: const Timeout(Duration(minutes: 3)));
 
+  testWidgets('B站图文动态（opus）：解析出动态里的图', (tester) async {
+    await mount(tester);
+    const url = 'https://www.bilibili.com/opus/1219805570066808839';
+
+    final p = LocalRegistry.detect(url);
+    expect(p, isNotNull, reason: 'opus 链接应当被识别为 B站');
+
+    final r = await p!.parse(url);
+    // ignore: avoid_print
+    print('[B站动态] ${r.type} | ${r.title} | ${r.author} | 图 ${r.imageCount} 张');
+    expect(r.type, 'images');
+    expect(r.imageCount, greaterThan(0), reason: '这条动态里有图');
+
+    for (final img in r.images.take(2)) {
+      // ignore: avoid_print
+      print('[B站动态] ${img.url.length > 95 ? img.url.substring(0, 95) : img.url}');
+      expect(img.url.contains('@'), isFalse, reason: '必须是原图');
+    }
+
+    final ok = await probe(r.images.first.url, r.referer);
+    // ignore: avoid_print
+    print('[B站动态] 抽查: HTTP ${ok.status}  ${ok.bytes} 字节  ${ok.type}');
+    expect(ok.status, anyOf(200, 206));
+  }, timeout: const Timeout(Duration(minutes: 3)));
+
   testWidgets('B站：视频链接仍然走视频分支（没有被图文逻辑抢走）',
       (tester) async {
     await mount(tester);
