@@ -37,6 +37,41 @@ class BilibiliLocalPlatform extends LocalPlatform {
         '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
   };
 
+  /// B站的设备指纹 cookie（`buvid3` / `buvid4`）。
+  ///
+  /// 【为什么要它】B站有风控，会把「没有设备标识、上来就调接口」的请求
+  /// 判成机器人，返回 `-352`。实测带上 buvid 后连续调用稳定返回 `code: 0`。
+  ///
+  /// 这两个值来自一个**公开接口**（`x/frontend/finger/spi`），不需要登录。
+  /// 拿一次缓存起来即可 —— 同一次解析会话里不用重复取。
+  static String _buvidCookie = '';
+
+  /// 取一次 buvid（拿不到就算了，不影响主流程）
+  Future<void> _ensureBuvid() async {
+    if (_buvidCookie.isNotEmpty) return;
+    try {
+      final r = await _dio.get<Map<String, dynamic>>(
+        'https://api.bilibili.com/x/frontend/finger/spi',
+      );
+      final d = r.data?['data'];
+      if (d is Map) {
+        final b3 = (d['b_3'] ?? '').toString();
+        final b4 = (d['b_4'] ?? '').toString();
+        if (b3.isNotEmpty) {
+          _buvidCookie = b4.isEmpty ? 'buvid3=$b3' : 'buvid3=$b3; buvid4=$b4';
+        }
+      }
+    } catch (_) {
+      // 拿不到就照旧 —— 顶多是多撞几次风控
+    }
+  }
+
+  /// 带 buvid 的请求头
+  Map<String, String> get _headers => {
+        ..._apiHeaders,
+        if (_buvidCookie.isNotEmpty) 'Cookie': _buvidCookie,
+      };
+
   static final _bvidRe = RegExp(r'(BV[0-9A-Za-z]{10})');
 
   /// 专栏：`bilibili.com/read/cv27142128`
@@ -70,13 +105,18 @@ class BilibiliLocalPlatform extends LocalPlatform {
         followRedirects: true,
         maxRedirects: 6,
         validateStatus: (s) => s != null && s < 500,
-        headers: _apiHeaders,
+        // 用 _headers（动态）而不是 _apiHeaders（常量）——
+        // 后者带不上 buvid cookie，容易被 B站风控判成机器人
+        headers: _headers,
       ));
 
   /* ------------------------------------------------------------------ */
 
   @override
   Future<LocalResult> parse(String url) async {
+    // 先拿设备指纹 —— 后面所有接口请求都带着它，能明显降低被风控的概率
+    await _ensureBuvid();
+
     var finalUrl = url;
     if (url.contains('b23.tv') || url.contains('acg.tv')) {
       finalUrl = await _resolveShort(url);
