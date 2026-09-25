@@ -24,11 +24,18 @@ class UpdateInfo {
     if (raw is! Map) return null;
     final build = (raw['build'] as num?)?.toInt() ?? 0;
     final url = (raw['url'] ?? '').toString();
-    if (build <= 0 || url.isEmpty) return null;
+
+    // 【url 允许为空】备用清单里故意不写域名（避免公开仓库暴露服务器地址），
+    // 这时用构建时注入的下载页兜底。
+    // 但两个都拿不到，就等于「提示有新版、点了却打不开」—— 那还不如当成
+    // 脏数据直接忽略，别去打扰用户。
+    final target = url.isNotEmpty ? url : kDownloadPageUrl;
+    if (build <= 0 || target.isEmpty) return null;
+
     return UpdateInfo(
       build: build,
       version: (raw['version'] ?? '').toString(),
-      url: url,
+      url: target,
       notes: (raw['notes'] ?? '').toString(),
       force: raw['force'] == true,
     );

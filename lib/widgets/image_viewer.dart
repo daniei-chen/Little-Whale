@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/parse_result.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import 'net_image.dart';
 
 /// 全屏图片预览。
 ///
@@ -107,27 +108,23 @@ class _ImageViewerState extends State<ImageViewer> {
                     minScale: 1,
                     maxScale: 4,
                     child: Center(
-                      child: Image.network(
+                      // 必须带 Referer：平台 CDN 有防盗链，不带就 403，
+                      // 表现是预览图一片空白（而保存到相册却是好的，很难查）
+                      child: NetImage(
                         url,
+                        referer: widget.result.referer,
                         fit: BoxFit.contain,
-                        loadingBuilder: (_, child, p) {
-                          if (p == null) return child;
-                          final total = p.expectedTotalBytes;
-                          return Center(
-                            child: SizedBox(
-                              width: 30,
-                              height: 30,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.4,
-                                color: Colors.white.withValues(alpha: 0.85),
-                                value: total == null
-                                    ? null
-                                    : p.cumulativeBytesLoaded / total,
-                              ),
+                        placeholder: const Center(
+                          child: SizedBox(
+                            width: 30,
+                            height: 30,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              color: Colors.white,
                             ),
-                          );
-                        },
-                        errorBuilder: (_, _, _) => const Center(
+                          ),
+                        ),
+                        error: const Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [

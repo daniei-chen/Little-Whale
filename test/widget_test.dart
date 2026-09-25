@@ -216,11 +216,15 @@ void main() {
       expect(ok.version, '1.1.0');
       expect(ok.force, isFalse);
 
-      // 缺 build、缺 url、根本不是 Map —— 都必须返回 null 而不是崩
+      // 缺 build、根本不是 Map —— 都必须返回 null 而不是崩
       expect(UpdateInfo.fromJson({'version': '1.1.0'}), isNull);
-      expect(UpdateInfo.fromJson({'build': 5}), isNull);
       expect(UpdateInfo.fromJson('垃圾数据'), isNull);
       expect(UpdateInfo.fromJson(null), isNull);
+
+      // 缺 url：**测试环境没有注入 DOWNLOAD_PAGE**，所以下载地址是空的，
+      // 等于「有新版却点不动」，应当当脏数据丢掉。
+      // （真机上有注入，这条会走另一条分支 —— 见下面那条测试）
+      expect(UpdateInfo.fromJson({'build': 5}), isNull);
     });
   });
   group('平台列表一致性（防止界面和解析器脱节）', () {

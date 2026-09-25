@@ -4,6 +4,7 @@ import '../data/local_store.dart';
 import '../models/parse_result.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/net_image.dart';
 import '../widgets/primitives.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -283,12 +284,14 @@ class _HistoryPageState extends State<HistoryPage> {
               ),
             ),
             if (item.coverUrl.isNotEmpty)
-              Image.network(
-                item.coverUrl,
-                fit: BoxFit.cover,
-                loadingBuilder: (_, child, p) => p == null ? child : const SizedBox.shrink(),
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
-              ),
+                  NetImage(
+                    item.coverUrl,
+                    referer: item.referer,
+                    cacheWidth:
+                        imageCacheWidth(76),
+                    placeholder: const SizedBox.shrink(),
+                    error: const SizedBox.shrink(),
+                  ),
             Center(
               child: Container(
                 width: 26,

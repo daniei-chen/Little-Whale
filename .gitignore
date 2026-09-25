@@ -69,3 +69,6 @@ build/app/intermediates/flutter/
 # 临时/测试产物
 tmp/
 Thumbs.db
+
+# 本地构建配置：里面是真实服务器地址，不能进公开仓库
+tools/build.config.ps1

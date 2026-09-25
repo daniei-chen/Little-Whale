@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
+import '../services/crash_log.dart';
 import '../services/update_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -97,6 +98,15 @@ class _MinePageState extends State<MinePage> {
                   ]),
                   _groupLabel('其他'),
                   _Group(children: [
+                    _cell(
+                      context,
+                      icon: AppIcons.info(AppColors.blue, 14),
+                      label: '错误日志',
+                      value: '排查问题用',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const CrashLogPage()),
+                      ),
+                    ),
                     _cell(
                       context,
                       icon: AppIcons.trash(AppColors.blue, 14),

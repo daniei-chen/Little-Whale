@@ -6,34 +6,29 @@
     <sub>抖音 · 小红书 · 哔哩哔哩 · 微博 · 快手 · 知乎</sub><br>
     <sub>全程在手机本地解析 · 不上传链接 · 不需要服务器</sub>
   </p>
+  <p>
+    <a href="../../actions/workflows/ci.yml"><img src="../../actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  </p>
 </div>
 
 ---
 
 <div align="center">
-  <img src="docs/screenshot-home.png" width="290" alt="首页">
+  <img src="docs/screenshot-home.png" width="280" alt="首页">
   &nbsp;&nbsp;
-  <img src="docs/screenshot-result.png" width="290" alt="解析结果">
+  <img src="docs/screenshot-result.png" width="280" alt="解析结果">
   <br>
-  <sub>左：首页，六个平台一键粘贴 &nbsp;|&nbsp; 右：图文作品解析后逐张勾选</sub>
+  <sub>左：首页 &nbsp;|&nbsp; 右：图文作品解析后逐张勾选</sub>
 </div>
 
 ---
 
-## 下载安装
+## 下载
 
-<div align="center">
+**从本仓库的 [Releases](../../releases) 页面下载最新版 APK。**
 
-### 👉 [**whale.kaogong.art/app**](https://whale.kaogong.art/app/)
-
-<sub>国内服务器 · 直连 · 约 20 MB</sub>
-
-</div>
-
-> **为什么不从 GitHub 下载？**
-> GitHub 在国内不翻墙基本下不动 —— 网页 `github.com` 时好时坏，
-> 而 Release 附件走的 `objects.githubusercontent.com` **基本连不上**。
-> 所以官网才是主渠道，本仓库的 [Releases](../../releases) 只作备用（海外用户 / 有代理时）。
+> 国内直连 GitHub 的下载域名不稳定，如果下不动，请走 App 内的更新提示，
+> 或联系分发者获取直连地址。
 
 ---
 
@@ -44,25 +39,24 @@
 
 小鲸鱼把解析**放回你自己的手机里**：
 
-- 🚫 **不经过任何服务器** —— 链接没有任何地方可传，隐私上更放心
+- 🚫 **不经过任何服务器** —— 链接没有任何地方可传
 - 🎬 **无水印原片** —— 走各平台的原始资源，不是压缩过的展示版
-- 📵 **不依赖网络服务** —— 没有后端要维护，服务器挂了也能用
+- 📵 **不依赖网络服务** —— 没有后端要维护
 - 🖼️ **图文可多选** —— 默认全选，也能只挑几张，或预览时单独存一张
+- 🎞️ **动图支持** —— 抖音的动图作品可以存成**带动效和音效的短视频**
 
 ---
 
 ## 支持平台
 
-| 平台 | 视频 | 图文 | 实测耗时 | 怎么做到的 |
+| 平台 | 视频 | 图文 | 动图 | 怎么做到的 |
 |:---:|:---:|:---:|:---:|---|
-| **抖音** | ✅ | ✅ | ~12s | 视频走**手机分享页**取 `<video>` 直链；图文从 DOM 抠图 |
-| **小红书** | ✅ | ✅ | ~3s | 抓页面解析内嵌数据；图片换公开 CDN 节点去水印 |
-| **哔哩哔哩** | ✅ | — | ~3s | 公开 API + wbi 签名（纯 HTTP，最快） |
-| **微博** | ✅ | ✅ | ~5s | 借内置 WebView 的 Cookie 调接口 |
-| **快手** | ✅ | ✅ | ~6s | 手机分享页取 `<video>` 直链 |
-| **知乎** | 专栏 | ✅ | ~8s | 专栏页 DOM 提取（**回答页需登录**，见下） |
-
-> 耗时是在 Android 模拟器上实测的**冷启动**数据，第二次会更快。
+| **抖音** | ✅ | ✅ | ✅ | 视频走**手机分享页**取 `<video>` 直链；图文/动图从页面数据流提取 |
+| **小红书** | ✅ | ✅ | — | 抓页面解析内嵌数据；图片换公开 CDN 节点去水印 |
+| **哔哩哔哩** | ✅ | — | — | 公开 API + wbi 签名（纯 HTTP，最快） |
+| **微博** | ✅ | ✅ | — | 借内置 WebView 的 Cookie 调接口 |
+| **快手** | ✅ | ✅ | — | 手机分享页取 `<video>` 直链 |
+| **知乎** | 专栏 | ✅ | — | 专栏页 DOM 提取（**回答页需登录**，见下） |
 
 ### 关于水印：各平台的具体处理
 
@@ -78,47 +72,18 @@
 ## 已知限制
 
 **知乎回答页打不开**（`zhihu.com/question/…/answer/…`）
-知乎要求登录才能看回答。请用**专栏文章**链接（`zhuanlan.zhihu.com/p/…`），
-那个不需要登录。App 内遇到回答页会直接提示你怎么做。
+知乎要求登录才能看回答。请用**专栏文章**链接（`zhuanlan.zhihu.com/p/…`）。
+App 内遇到回答页会直接提示你怎么做。
 
 **抖音图文偶尔失败一次**
 这是抖音的风控 —— 短时间内解析太频繁时，它会悄悄返回一个「不渲染图片」的
-降级页面（页面能打开、也不报错，就是没图）。App 会自动重试一次；
-还不行的话，等十几秒再来。
+降级页面。App 会自动重试一次；还不行就等十几秒再来。
 
-**首次保存要授权相册**
-Android 10 以上走 MediaStore，**不需要存储权限**；只会在第一次保存时
-弹一次相册写入确认。
+**B站未登录最高 720P**
+要更高画质需要登录，本地解析不做这件事。
 
----
-
-## 版本更新
-
-App 内建自动检查，**不需要用户翻墙**：
-
-```
-主地址   https://whale.kaogong.art/app/version.json
-备用地址 https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json
-                    ↑ jsDelivr 转发 GitHub 上的同一份文件（国内实测可直连）
-```
-
-两个地址**任一可用**就能检查到更新，单一渠道挂掉不影响。
-
-- 启动 3 秒后静默检查，只有真有新版才弹窗
-- 同一个版本 **24 小时内只提醒一次**
-- 网络失败**静默跳过** —— 更新检查永远不打扰用户
-- 点「立即更新」跳官网下载页，覆盖安装**数据都保留**
-
-### 发版
-
-```powershell
-.\tools\release.ps1 -Notes "新增 XX 平台"
-```
-
-自动完成：版本号三处同步（`pubspec.yaml` / `lib/config.dart` / `server/version.json`）
-→ 跑 `flutter analyze` + 单元测试（不过就拒绝发版）→ 构建 APK → 提交推送。
-
-推完再手动做两步：传 APK 到服务器、同步 `version.json`。
+**遇到问题怎么办**
+「我的 → 错误日志」里有本地记录，截图即可定位。日志只存在手机里，不会上传。
 
 ---
 
@@ -138,7 +103,7 @@ App 内建自动检查，**不需要用户翻墙**：
 │  (抖音/快手/微博/知乎)   │                            │
 │                          ├─ 注入钩子拦截 fetch / XHR  │
 │                          ├─ 特征伪装（补桌面 Chrome 特征）│
-│                          └─ 读 DOM / 页面变量          │
+│                          └─ 读 DOM / 页面数据流        │
 │                                                      │
 │  下载 ──► 直连 CDN（带 Referer 过防盗链）              │
 │          断点续传 · 按文件头判定扩展名                  │
@@ -147,32 +112,41 @@ App 内建自动检查，**不需要用户翻墙**：
               保存到系统相册
 ```
 
-### 加一个平台要做什么
+### 几个踩过的坑
 
-1. 在 `lib/local/` 实现一个 `LocalPlatform` 子类
-   （`key` / `name` / `hosts` / `referer` / `parse`）
-2. 在 `lib/local/registry.dart` 的 `all` 列表加一行
-3. 在 `lib/data/platforms.dart` 的 `kPlatforms` 加一行（**界面上的平台标签**）
-
-> 第 3 步最容易漏 —— 漏了的话解析其实已经支持，但用户界面上看不到，
-> 会以为没做。所以有一条单元测试专门断言这两个列表一一对应。
+- **抖音图文**要读页面的 `__pace_f` 数据流，而不是抠 DOM —— DOM 是懒加载的，
+  而且**动图的视频地址根本不在 DOM 里**
+- **抖音动图**的视频在 `video.playAddr`，它是**数组**且字段叫 `src`（不是 `urlList`）
+- **界面上的图片要带 Referer**，否则平台 CDN 403，表现是「解析成功但封面空白」
+- **快手**偶发返回降级页（没有 `<video>`），只拿到图时要重试一次
+- **扩展名要按文件头判定** —— 小红书视频服务器谎报 `video/mp4`，实际是 QuickTime
 
 ---
 
 ## 自行构建
 
 ```bash
-# 环境：Flutter 3.35+ / JDK 17 / Android SDK 35
+# 环境：Flutter 3.35+ / JDK 17 / Android SDK 35+（minSdk 24）
 git clone https://github.com/daniei-chen/Little-Whale.git
 cd Little-Whale
 flutter pub get
 
-flutter analyze                        # 应当零问题
-flutter test                           # 单元测试
+flutter analyze          # 应当零问题
+flutter test             # 单元测试
+
+# 直接构建：能跑，但不带更新检查
 flutter build apk --release --split-per-abi
+
+# 要带更新检查，把地址通过 --dart-define 注入：
+flutter build apk --release \
+  --dart-define=UPDATE_URL=https://<你的域名>/app/version.json \
+  --dart-define=DOWNLOAD_PAGE=https://<你的域名>/app/
 ```
 
-集成测试要连着真机或模拟器：
+> 更新地址是**构建时注入**的，不写死在源码里 —— 因为源码公开，
+> 写死等于把服务器地址印在网上。详见 `lib/config.dart` 的注释。
+
+集成测试要连着真机或模拟器（WebView 是必需的）：
 
 ```bash
 flutter test integration_test/local_parse_test.dart -d <设备ID>
@@ -183,12 +157,12 @@ flutter test integration_test/local_parse_test.dart -d <设备ID>
 
 ```
 lib/
-├── config.dart                版本号、更新清单地址
+├── config.dart                版本号 + 更新地址（构建时注入）
 ├── local/                     ★ 本地解析引擎
 │   ├── engine.dart            隐藏 WebView：注入钩子、拦截响应、特征伪装
 │   ├── registry.dart          平台注册表
 │   ├── types.dart             统一结果模型
-│   ├── douyin.dart            抖音
+│   ├── douyin.dart            抖音（视频 / 图文 / 动图）
 │   ├── xiaohongshu.dart       小红书
 │   ├── bilibili.dart          B站
 │   ├── weibo.dart             微博
@@ -196,17 +170,33 @@ lib/
 │   └── zhihu.dart             知乎
 ├── services/
 │   ├── download_service.dart  下载：断点续传、按文件头定后缀
-│   └── update_service.dart    检查更新
+│   ├── update_service.dart    检查更新
+│   └── crash_log.dart         本地错误日志
+├── widgets/
+│   └── net_image.dart         带 Referer 的图片（列表一律用它）
 ├── pages/                     首页 / 记录 / 我的
-├── widgets/                   通用组件
 └── state/app_state.dart       全局状态
 
-server/version.json            更新清单（备用副本）
-tools/release.ps1              一键发版
-docs/                          README 用的图标与截图
+server/version.json            更新清单（备用副本，经 jsDelivr 分发）
+tools/
+├── release.ps1                一键发版
+├── check.ps1                  本地验证
+└── build.config.example.ps1   构建配置示例
 ```
 
 </details>
+
+---
+
+## 加一个平台要做什么
+
+1. 在 `lib/local/` 实现一个 `LocalPlatform` 子类
+   （`key` / `name` / `hosts` / `referer` / `parse`）
+2. 在 `lib/local/registry.dart` 的 `all` 列表加一行
+3. 在 `lib/data/platforms.dart` 的 `kPlatforms` 加一行（**界面上的平台标签**）
+
+> 第 3 步最容易漏 —— 漏了的话解析其实已经支持，但界面上看不到，
+> 用户会以为没做。所以有一条单元测试专门断言这两个列表一一对应。
 
 ---
 

@@ -1,0 +1,47 @@
+name: CI
+
+# 每次推送和 PR 都跑一遍静态检查 + 单元测试。
+#
+# 【为什么这个是必要的】
+# 这个项目的失败模式很阴险：平台一改版，解析就悄悄失效 ——
+# 界面不报错、测试也可能因为断言太松而变绿。
+# 已经踩过一次：快手把视频作品识别成了图集，回归测试照样通过。
+# 所以「每次推送都自动跑一遍」不是形式，是防线。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: 依赖
+        run: flutter pub get
+
+      - name: 静态检查
+        run: flutter analyze
+
+      - name: 单元测试
+        # 注意：集成测试跑不了 —— 它需要真实设备上的 WebView，
+        # CI 里没有。那些用例只能在本地/真机上跑，见 tools/check.ps1。
+        run: flutter test
+
+      - name: 构建（确认能出包）
+        run: flutter build apk --release --target-platform android-arm64

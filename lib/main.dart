@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'services/crash_log.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 【必须在 runApp 之前装】这样连启动阶段的异常也能记下来 ——
+  // 用户反馈「一打开就闪退」时，日志里就有线索。
+  CrashLog.install();
 
   // 状态栏：白底深色图标，和设计稿的白色导航栏一致
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(

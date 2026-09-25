@@ -2,34 +2,46 @@
 ///
 /// 【为什么版本号写在这里而不是用 package_info_plus】
 /// 少一个依赖就少一处构建风险。代价是可能和 pubspec.yaml 脱节 ——
-/// 所以有一条单元测试专门比对两者（见 test/widget_test.dart 的
-/// 「版本号必须和 pubspec 一致」）。改了 pubspec 忘了改这里，测试会红。
+/// 所以有一条单元测试专门比对两者。改了 pubspec 忘了改这里，测试会红。
 library;
 
 /// 展示给用户的版本号，必须与 pubspec.yaml 的 `version:` 前半段一致
-const String kAppVersion = '0.0.2';
+const String kAppVersion = '0.0.3';
 
-/// 构建号，必须与 pubspec.yaml 的 `version:` 后半段一致（`1.0.0+1` 里的 1）。
+/// 构建号，必须与 pubspec.yaml 的 `version:` 后半段一致（`0.0.3+3` 里的 3）。
 /// **更新判断只比这个数**，比字符串版本号可靠。
-const int kAppBuild = 2;
+const int kAppBuild = 3;
 
-/// 更新清单地址。
-///
-/// 【主地址走自己的服务器】国内直连、可控、随时能改。
-///
-/// 【为什么不用 GitHub 原始地址】`raw.githubusercontent.com` 在国内**被墙**，
-/// Release 附件走的 `objects.githubusercontent.com` 国内也基本连不上 ——
-/// 用户不翻墙拿不到更新。
-///
-/// 备用地址用 **jsDelivr**（它把 GitHub 仓库的文件当 CDN 发，国内实测可直连）。
-/// 两个地址任一可用就能检查到更新，单一渠道挂掉不影响。
-const String kUpdateManifestUrl =
-    'https://whale.kaogong.art/app/version.json';
+/* ---------------------------------------------------------------------- */
+/* 更新检查                                                                */
+/* ---------------------------------------------------------------------- */
+//
+// 【地址为什么是构建时注入的，而不是写死在这里】
+//
+// 这些地址指向自己的服务器。源代码是公开的，写死就等于把服务器地址
+// 印在 GitHub 上 —— 没必要对外暴露。
+//
+// 所以改成构建时通过 --dart-define 注入：
+//   flutter build apk --release \
+//     --dart-define=UPDATE_URL=https://<域名>/app/version.json \
+//     --dart-define=UPDATE_URL_ALT=https://cdn.jsdelivr.net/gh/<用户>/<仓库>@main/server/version.json \
+//     --dart-define=DOWNLOAD_PAGE=https://<域名>/app/
+//
+// 发版脚本 tools/release.ps1 会自动读 tools/build.config.ps1（不进仓库）
+// 把这些参数带上。
+//
+// 留空的效果：**跳过更新检查**，App 其它功能完全正常。
+// 也就是说从仓库 clone 下来直接构建是能跑的，只是没有更新提醒。
 
-/// 备用地址：jsDelivr 转发同一个仓库里的清单文件
-const String kUpdateManifestUrlAlt =
-    'https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json';
+/// 更新清单主地址（自己的服务器，国内直连）
+const String kUpdateManifestUrl = String.fromEnvironment('UPDATE_URL');
 
-/// 检查更新的冷却时间：同一个版本一天最多提醒一次，
-/// 免得每次启动都弹窗烦人。
+/// 更新清单备用地址（jsDelivr 转发 GitHub 上的副本，国内同样可直连）。
+/// 主地址不通时会自动试这个 —— 单一渠道挂掉不影响用户收到更新。
+const String kUpdateManifestUrlAlt = String.fromEnvironment('UPDATE_URL_ALT');
+
+/// 下载页地址。更新清单里带了 `url` 就用清单的，没带就用这个。
+const String kDownloadPageUrl = String.fromEnvironment('DOWNLOAD_PAGE');
+
+/// 更新检查的冷却时间：同一个版本一天最多提醒一次。
 const Duration kUpdateCheckInterval = Duration(hours: 24);

@@ -5,6 +5,7 @@ import '../models/parse_result.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/image_viewer.dart';
+import '../widgets/net_image.dart';
 import '../widgets/primitives.dart';
 
 class HomePage extends StatefulWidget {
@@ -758,12 +759,14 @@ class _ResultCard extends StatelessWidget {
               ),
             ),
             if (result.coverUrl.isNotEmpty)
-              Image.network(
-                result.coverUrl,
-                fit: BoxFit.cover,
-                loadingBuilder: (_, child, p) => p == null ? child : const SizedBox.shrink(),
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
-              ),
+                  NetImage(
+                    result.coverUrl,
+                    referer: result.referer,
+                    cacheWidth:
+                        imageCacheWidth(420),
+                    placeholder: const SizedBox.shrink(),
+                    error: const SizedBox.shrink(),
+                  ),
             // 设计稿里那层很淡的斜向高光
             const DecoratedBox(
               decoration: BoxDecoration(
@@ -887,12 +890,15 @@ class _ResultCard extends StatelessWidget {
                                   Colors.transparent, BlendMode.dst)
                               : const ColorFilter.mode(
                                   Color(0x66FFFFFF), BlendMode.srcOver),
-                          child: Image.network(
+                          child: NetImage(
                             img.thumb?.isNotEmpty == true ? img.thumb! : img.url,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (_, child, p) =>
-                                p == null ? child : const SizedBox.shrink(),
-                            errorBuilder: (_, _, _) => const Center(
+                            referer: result.referer,
+                            // 缩略图只显示 150 逻辑像素宽，按这个尺寸解码 ——
+                            // 别把 1440px 的原图整个解进内存（46 张时差别很明显）
+                            cacheWidth:
+                                imageCacheWidth(150),
+                            placeholder: const SizedBox.shrink(),
+                            error: const Center(
                               child: Icon(Icons.broken_image_outlined,
                                   color: AppColors.muted, size: 22),
                             ),
