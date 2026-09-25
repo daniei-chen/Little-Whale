@@ -291,70 +291,73 @@ class DouyinLocalPlatform extends LocalPlatform {
   }) async {
     final pageUrl = 'https://www.douyin.com/note/$id';
 
-    // 轮播是懒加载的：等「图片数量连续几轮不再增长」再收工。
-    // 这段等待必须由 Dart 驱动 —— WebView 不会等 Promise。
-    var lastCount = -1;
-    var stable = 0;
-    var firstSeenAt = 0;
-
+    // 【为什么改成读 __pace_f 而不是抠 DOM】
+    //
+    // 抠 DOM 有两个硬伤：
+    //   1. 轮播是**懒加载**的 —— 只渲染可见的那几张，得一边等一边数数量，
+    //      慢而且可能漏。
+    //   2. **动图的视频地址根本不在 DOM 里** —— 页面只把静态封面渲染成 <img>，
+    //      用户存下来就是一张死图，动效和声音全丢了。
+    //
+    // 而页面里的 `__pace_f`（React Server Components 的数据流）**一次就带了
+    // 完整的 images 数组**，每项含：
+    //   · urlList[]        —— 静态图（无水印，带 tplv-dy-aweme-images 模板）
+    //   · video.playAddr[] —— **动图的短视频**（带音轨，形如 douyinvod.com/...mp4）
+    //   · clipType == 5    —— 动图标志
+    //
+    // 所以拿到第一条就齐了，不用等稳定；DOM 抠图保留为兜底，
+    // 万一哪天 pace 结构变了还能出结果。
     final r = await LocalEngine.instance.evaluatePolling(
       pageUrl,
-      _noteProbeScript,
-      settle: const Duration(milliseconds: 600),
+      _paceNoteScript,
+      settle: const Duration(milliseconds: 500),
       interval: const Duration(milliseconds: 250),
       timeout: timeout,
-      isDone: (value) {
-        final n = (value is Map && value['images'] is List)
-            ? (value['images'] as List).length
-            : 0;
-        final total = (value is Map ? (value['total'] as num?)?.toInt() : 0) ?? 0;
-
-        if (n > 0 && firstSeenAt == 0) {
-          firstSeenAt = DateTime.now().millisecondsSinceEpoch;
-        }
-        if (n > 0 && n == lastCount) {
-          stable++;
-        } else {
-          stable = 0;
-        }
-        lastCount = n;
-
-        // 【最快的一条】页面自己写着总数（比如 4/46），拿够了立刻收工
-        if (n > 0 && total > 0 && n >= total) return true;
-
-        // 主判据：连续 2 轮数量不再变化，说明加载完了
-        if (n > 0 && stable >= 2) return true;
-
-        // 【兜底，很重要】已经拿到图片，但数量一直在小幅波动
-        // （轮播会边渲染边回收，数量可能在 45/46 之间反复跳）——
-        // 这种情况「连续不变」可能永远等不到，曾经因此白等满 25 秒超时。
-        // 所以只要已经有图，最多再观察 2 秒就收工。
-        if (n > 0 &&
-            DateTime.now().millisecondsSinceEpoch - firstSeenAt > 2000) {
-          return true;
-        }
-        return false;
-      },
+      isDone: (v) =>
+          v is Map && v['images'] is List && (v['images'] as List).isNotEmpty,
     );
 
-    if (r is! Map) {
-      // 页面连内容都没读到 —— 大概率也是风控，交给上层重试
-      return null;
+    if (r is! Map) return null;
+
+    var rawImages = r['images'];
+    var title = (r['title'] ?? '').toString();
+    var author = (r['author'] ?? '').toString();
+
+    // 【为什么要补读一次 DOM】
+    // `__pace_f` 里的图片数据**来得很早**（页面骨架一出来就有），
+    // 而 `document.title` 和作者名是页面稍后才设上的 ——
+    // 于是「图片有了但标题还是空的」。所以标题/作者缺任何一项都要补读；
+    // 图片没解析出来也走这条路（DOM 抠图兜底）。
+    final needDom = rawImages is! List ||
+        rawImages.isEmpty ||
+        title.isEmpty ||
+        author.isEmpty;
+
+    if (needDom) {
+      final dom = await LocalEngine.instance.evalCurrent(_noteDomScript);
+      if (dom is Map) {
+        final domImages = dom['images'];
+        if ((rawImages is! List || rawImages.isEmpty) && domImages is List) {
+          rawImages = domImages;
+        }
+        if (title.isEmpty) title = (dom['title'] ?? '').toString();
+        if (author.isEmpty) author = (dom['author'] ?? '').toString();
+      }
     }
-    final rawImages = r['images'];
-    if (rawImages is! List || rawImages.isEmpty) {
-      return null;
-    }
+
+    if (rawImages is! List || rawImages.isEmpty) return null;
 
     final images = <LocalImage>[];
     for (final it in rawImages) {
-      final m = it is Map ? it : const {};
-      final url = (m['url'] ?? '').toString();
+      if (it is! Map) continue;
+      final url = (it['url'] ?? '').toString();
       if (url.isEmpty) continue;
       images.add(LocalImage(
         url: url,
-        width: _asInt(m['width']) ?? 0,
-        height: _asInt(m['height']) ?? 0,
+        width: _asInt(it['width']) ?? 0,
+        height: _asInt(it['height']) ?? 0,
+        videoUrl: (it['videoUrl'] ?? '').toString(),
+        durationSec: _asInt(it['durationSec']) ?? 0,
       ));
     }
     if (images.isEmpty) throw const LocalParseError('图文作品没抓到可用的图片地址');
@@ -363,8 +366,8 @@ class DouyinLocalPlatform extends LocalPlatform {
       platform: key,
       platformName: name,
       type: 'images',
-      title: (r['title'] ?? '').toString(),
-      author: (r['author'] ?? '').toString(),
+      title: title,
+      author: author,
       cover: images.first.url,
       referer: referer,
       images: images,
@@ -454,6 +457,125 @@ class DouyinLocalPlatform extends LocalPlatform {
 })()
 ''';
 
+  /// 读 `__pace_f`（React Server Components 的数据流）—— **图文作品的主路径**。
+  ///
+  /// 【为什么要用它，而不是抠 DOM】
+  /// 抠 DOM 有两个硬伤：
+  ///   1. 轮播是**懒加载**的，只渲染可见的那几张 —— 得一边等一边数数量，
+  ///      慢，而且可能漏。
+  ///   2. **动图的视频地址根本不在 DOM 里** —— 页面只把静态封面渲染成 `<img>`。
+  ///      用户保存下来就是一张死图，动效和声音全丢。
+  ///
+  /// 而 `__pace_f` 里一次就带着完整的 `images` 数组：
+  ///   · `urlList[]`        —— 静态图，**无水印**（`downloadUrlList` 才带水印，不用它）
+  ///   · `video.playAddr[]` —— **动图的短视频**（带音轨）
+  ///   · `clipType == 5`    —— 动图标志
+  ///
+  /// 【一个踩过的坑】`playAddr` 是**数组**，元素字段名是 `src`。
+  /// 一开始按对象处理、找 `playAddr.urlList`，结果永远是 0 条 ——
+  /// 明明数据就在眼前却拿不到。
+  static const String _paceNoteScript = r'''
+(function () {
+  var host = '';
+  function scan() {
+    var f = window.__pace_f || [];
+    for (var i = 0; i < f.length; i++) {
+      var s = '';
+      try { s = String(f[i]); } catch (e) { continue; }
+      if (s.indexOf('"images":[{"width"') > -1) { host = s; break; }
+    }
+    if (!host) return null;
+
+    // 平衡括号抠出完整的数组 —— JSON.parse 需要一整段，不能截断
+    var at = host.indexOf('"images":[');
+    var start = host.indexOf('[', at);
+    var depth = 0, inStr = false, esc = false, end = -1;
+    for (var k = start; k < host.length; k++) {
+      var ch = host.charAt(k);
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '[' || ch === '{') depth++;
+      else if (ch === ']' || ch === '}') { depth--; if (depth === 0) { end = k; break; } }
+    }
+    if (end < 0) return null;
+    try { return JSON.parse(host.slice(start, end + 1)); } catch (e) { return null; }
+  }
+
+  var host = '';
+  var arr = scan();
+  if (!arr) return JSON.stringify({ images: [] });
+
+  var out = [];
+  for (var n = 0; n < arr.length; n++) {
+    var it = arr[n] || {};
+    var list = it.urlList || it.url_list || [];
+    var url = list.length ? String(list[0]) : '';
+    if (!url) continue;
+
+    var item = { url: url, width: it.width || 0, height: it.height || 0 };
+
+    // 动图：视频地址在 video.playAddr（数组，元素字段是 src）
+    var v = it.video;
+    if (v) {
+      var pa = v.playAddr || v.play_addr || [];
+      var src = '';
+      if (pa && pa.length) {
+        for (var j = 0; j < pa.length && !src; j++) {
+          if (pa[j] && pa[j].src) src = String(pa[j].src);
+          else if (pa[j] && pa[j].url) src = String(pa[j].url);
+        }
+      }
+      if (src) {
+        item.videoUrl = src;
+        item.durationSec = Math.round((Number(v.duration) || 0) / 1000);
+      }
+    }
+    out.push(item);
+  }
+
+  // ---- 标题 / 作者 ----
+  //
+  // 【必须从 pace 数据里取，不能读 document.title】
+  // pace 里的图片数据**来得很早**（页面骨架一出来就有），
+  // 那一刻 `document.title` 还没设上 —— 于是会出现「46 张图都有了、标题却是空的」。
+  // 直接在 pace 文本里抓 desc / nickname 最稳。
+  function grab(re) {
+    var m = host.match(re);
+    if (!m) return '';
+    var s = m[1];
+    // 处理 JSON 转义
+    try { return JSON.parse('"' + s + '"'); } catch (e) { return s; }
+  }
+
+  var title = grab(/"desc":"((?:[^"\\]|\\.)*)"/);
+  if (!title) title = String(document.title || '').replace(/\s*-\s*抖音\s*$/, '').trim();
+
+  var author = grab(/"nickname":"((?:[^"\\]|\\.)*)"/);
+  if (!author) {
+    // pace 里没有就退回 DOM：页面上有 19 个 /user/ 链接，只有 1 个是真作者 ——
+    // 必须同时满足「非 self」「元素可见」「文本非空」
+    var links = document.querySelectorAll('a[href*="/user/"]');
+    for (var p = 0; p < links.length; p++) {
+      var a = links[p];
+      var href = a.getAttribute('href') || '';
+      if (href.indexOf('self') > -1) continue;
+      var t = String(a.textContent || '').trim();
+      if (!t || t.length > 40) continue;
+      if (!(a.offsetWidth || a.offsetHeight || a.getClientRects().length)) continue;
+      author = t;
+      break;
+    }
+  }
+
+  return JSON.stringify({ images: out, title: title, author: author });
+})()
+''';
+
   /// 同步表达式，返回 JSON 字符串。
   ///
   /// 图片判据：URL 带 `tplv-dy-aweme-images` 且落在这两个 CDN 域上 ——
@@ -462,7 +584,7 @@ class DouyinLocalPlatform extends LocalPlatform {
   /// 作者判据三条缺一不可：非 `/user/self`、元素可见、文本非空。
   /// 页面上有 19 个 `a[href*="/user/"]`，只有 1 个是真作者 ——
   /// 少任何一条都会抓到推荐流里的隐藏元素，甚至不可见字符组成的假名字。
-  static const String _noteProbeScript = r'''
+  static const String _noteDomScript = r'''
 (function () {
   var seen = {}, out = [];
   var all = document.querySelectorAll('img');

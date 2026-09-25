@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import '../data/api_client.dart';
 import '../data/local_store.dart';
 import '../data/platforms.dart';
 import '../local/registry.dart';
@@ -22,8 +21,6 @@ class AppState extends ChangeNotifier {
   /* ---------------- 基础设施 ---------------- */
 
   AppSettings settings = const AppSettings();
-  ApiClient? _api;
-  ApiClient get api => _api ??= ApiClient(baseUrl: settings.apiBase);
 
   List<ParseResult> history = const [];
   AppStat stat = const AppStat();
@@ -46,9 +43,14 @@ class AppState extends ChangeNotifier {
   PlatformMeta? detected;
   bool parsing = false;
 
-  /// 最近一次解析是否「本地失败、自动回退到服务器」成功的。
-  /// 有它才能在界面上解释「为什么这次慢了一点 / 走了服务器」。
-  bool localFallback = false;
+  /* ---------------- 动图偏好 ---------------- */
+
+  /// 动图存成视频还是静态图（跟设置里的开关同步）
+  bool get saveLiveAsVideo => settings.saveLiveAsVideo;
+
+  void setSaveLiveAsVideo(bool v) {
+    updateSettings(settings.copyWith(saveLiveAsVideo: v));
+  }
 
   /* ---------------- 图片多选 ---------------- */
 
@@ -108,7 +110,6 @@ class AppState extends ChangeNotifier {
 
   Future<void> bootstrap() async {
     settings = await LocalStore.instance.getSettings();
-    _api = ApiClient(baseUrl: settings.apiBase);
     history = await LocalStore.instance.getHistory();
     stat = await LocalStore.instance.getStat();
     cacheKb = await LocalStore.instance.cacheSizeKb();
@@ -259,35 +260,10 @@ class AppState extends ChangeNotifier {
     _startFakeProgress();
 
     try {
-      // 本地优先。本地跑不通（比如抖音视频，或平台还没实现本地解析）时，
-      // **自动回退到服务器**一次 —— 用户不需要自己判断该用哪种方式。
-      // 两者都失败才报错，报的是本地那条更有指导性的信息。
-      ParseResult? r;
-      Object? localError;
-      String localMessage = '';
-
-      if (settings.parseMode == 'local') {
-        try {
-          r = await _parseLocally(text);
-          localFallback = false;
-        } catch (e) {
-          localError = e;
-          localMessage = e is lt.LocalParseError ? e.message : '$e';
-        }
-      }
-
-      if (r == null) {
-        try {
-          r = await api.parse(text);
-          localFallback = localError != null; // 回退成功了，让 UI 能说明一下
-        } catch (serverError) {
-          // 服务器也不行：如果本地有更具体的说明就报本地那条
-          if (localMessage.isNotEmpty) {
-            throw lt.LocalParseError('$localMessage\n\n（服务器解析也没成功）');
-          }
-          rethrow;
-        }
-      }
+      // 只有一条路：手机本地解析。
+      // 原来还有个「服务器模式」和自动回退，其实从来没真正做过服务端解析，
+      // 摆着只会让用户以为链接会被上传 —— 已整体移除。
+      final r = await _parseLocally(text);
 
       _stopFakeProgress();
       progress = 100;
@@ -318,11 +294,10 @@ class AppState extends ChangeNotifier {
     _progressTimer?.cancel();
     // 文案要跟着解析方式走 —— 本地解析却写「等待服务端返回」会让人以为
     // 链接被上传了，那正是用户最在意的事。
-    final local = settings.parseMode == 'local';
     final steps = <List<Object>>[
       [18, '识别分享链接'],
-      [42, local ? '在手机里打开作品页' : '请求作品信息'],
-      [66, local ? '提取原片地址' : '解析源地址'],
+      [42, '在手机里打开作品页'],
+      [66, '提取原片地址'],
       [86, '生成下载链接'],
     ];
     var i = 0;
@@ -335,7 +310,7 @@ class AppState extends ChangeNotifier {
       } else {
         // 到 90% 就停住等真实结果，不再往上爬
         progress = 90;
-        progressLabel = local ? '正在解析，请稍候' : '等待服务端返回';
+        progressLabel = '正在解析，请稍候';
         notifyListeners();
         t.cancel();
       }
@@ -409,9 +384,7 @@ class AppState extends ChangeNotifier {
     final outcome = await DownloadService.instance.fetchAndSave(
       proxyUrl: url,
       isVideo: true,
-      // 本地解析拿到的是原始直链，必须带 Referer 过防盗链
       referer: r.referer,
-      preferDirect: settings.directDownload,
       fileHint: r.title,
       onProgress: (p) {
         downloadProgress = p;
@@ -442,11 +415,14 @@ class AppState extends ChangeNotifier {
     downloadLabel = '保存中';
     notifyListeners();
 
+    final img = r.images[index];
+    // 动图按用户偏好走：存带音轨的短视频，或只存静态封面
+    final asVideo = img.isLive && settings.saveLiveAsVideo;
+
     final outcome = await DownloadService.instance.fetchAndSave(
-      proxyUrl: r.images[index].url,
-      isVideo: false,
+      proxyUrl: asVideo ? img.videoUrl : img.url,
+      isVideo: asVideo,
       referer: r.referer,
-      preferDirect: settings.directDownload,
       // 用原图序号，和批量保存的命名保持一致
       fileHint: '${r.title}_${index + 1}',
       onProgress: (p) {
@@ -464,8 +440,12 @@ class AppState extends ChangeNotifier {
 
   /// 图文作品逐张保存 —— **只存勾选的那些**。
   ///
-  /// 刻意做成**串行**：手机相册写入是有限并发能力的，
-  /// 同时写多张容易失败，而且系统授权弹窗也不适合连着弹。
+  /// 【为什么改成并发】原来是一张接一张串行下，46 张图每张 1–2MB，
+  /// 用户得盯着进度条等好几分钟。改成**最多 3 张同时下**：
+  /// 网络吞吐能跑满，相册写入（MediaStore）实测扛得住 3 并发。
+  ///
+  /// 【为什么不更高】并发再往上，平台 CDN 会开始限速，反而更慢；
+  /// 而且保存顺序会乱。3 是实测下来最稳的点。
   Future<DownloadOutcome> saveAllImages() async {
     final r = result;
     if (r == null || r.images.isEmpty) {
@@ -479,39 +459,77 @@ class AppState extends ChangeNotifier {
     }
 
     downloading = true;
+    downloadProgress = 0;
+    downloadLabel = '保存中 0/${targets.length}';
     notifyListeners();
+
+    const maxParallel = 3;
+    final total = targets.length;
+
+    // 每张的进度（0–1）。并行时不能再用「第 n 张」算总进度，
+    // 否则进度条会来回跳。
+    final each = <int, double>{};
+    final outcomes = List<DownloadOutcome?>.filled(total, null);
+
+    var nextSlot = 0;
+    var finished = 0;
+
+    Future<void> worker() async {
+      while (true) {
+        final slot = nextSlot++;
+        if (slot >= total) return;
+
+        final i = targets[slot] < 0 || targets[slot] >= r.images.length
+            ? -1
+            : targets[slot];
+        if (i < 0) {
+          outcomes[slot] =
+              const DownloadOutcome(saved: false, message: '这张图不存在');
+          finished++;
+          continue;
+        }
+
+        final img = r.images[i];
+        // 动图按用户偏好走：存带音轨的短视频，或只存静态封面
+        final asVideo = img.isLive && settings.saveLiveAsVideo;
+
+        outcomes[slot] = await DownloadService.instance.fetchAndSave(
+          proxyUrl: asVideo ? img.videoUrl : img.url,
+          isVideo: asVideo,
+          referer: r.referer,
+          // 编号用**原图序号**而不是选中序号 —— 否则保存第 3、7 张时会变成 _1、_2，
+          // 回头根本对不上是作品里的哪张。
+          fileHint: '${r.title}_${i + 1}',
+          onProgress: (p) {
+            each[slot] = p;
+            final sum = each.values.fold<double>(0, (a, b) => a + b);
+            downloadProgress = sum / total;
+            notifyListeners();
+          },
+        );
+
+        each[slot] = 1;
+        finished++;
+        downloadLabel = '保存中 $finished/$total';
+        downloadProgress = finished / total;
+        notifyListeners();
+      }
+    }
+
+    await Future.wait(
+      List.generate(maxParallel < total ? maxParallel : total, (_) => worker()),
+    );
 
     var ok = 0;
     var fail = 0;
     var lastMsg = '';
-
-    for (var n = 0; n < targets.length; n++) {
-      final i = targets[n] < 0 || targets[n] >= r.images.length ? -1 : targets[n];
-      if (i < 0) continue;
-
-      downloadLabel = '保存中 ${n + 1}/${targets.length}';
-      downloadProgress = (n + 1) / targets.length;
-      notifyListeners();
-
-      final img = r.images[i];
-      final outcome = await DownloadService.instance.fetchAndSave(
-        proxyUrl: img.url,
-        isVideo: false,
-        referer: r.referer,
-        preferDirect: settings.directDownload,
-        // 编号用**原图序号**而不是选中序号 —— 否则保存第 3、7 张时会变成 _1、_2，
-        // 回头根本对不上是作品里的哪张。
-        fileHint: '${r.title}_${i + 1}',
-        onProgress: (p) {
-          downloadProgress = (n + p) / targets.length;
-          notifyListeners();
-        },
-      );
-      if (outcome.saved) {
+    for (final o in outcomes) {
+      if (o == null) continue;
+      if (o.saved) {
         ok++;
       } else {
         fail++;
-        lastMsg = outcome.message;
+        if (o.message.isNotEmpty) lastMsg = o.message;
       }
     }
 
@@ -547,7 +565,6 @@ class AppState extends ChangeNotifier {
 
   Future<void> updateSettings(AppSettings next) async {
     settings = await LocalStore.instance.saveSettings(next);
-    _api = ApiClient(baseUrl: settings.apiBase);
     notifyListeners();
   }
 
@@ -558,11 +575,4 @@ class AppState extends ChangeNotifier {
   }
 
   /// 服务健康状态（「我的」页展示）
-  Future<Map<String, dynamic>?> checkHealth() async {
-    try {
-      return await api.health();
-    } catch (_) {
-      return null;
-    }
-  }
 }

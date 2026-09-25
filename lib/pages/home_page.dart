@@ -204,44 +204,52 @@ class _HomePageState extends State<HomePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('小鲸鱼', style: AppText.brandTitle),
+                      Row(
+                        children: [
+                          const Expanded(
+                              child: Text('小鲸鱼', style: AppText.brandTitle)),
+                          // 标识放在标题这一行、右对齐 ——
+                          // 挤在平台标签那排会显得杂乱，也没有呼吸感
+                          const _LocalBadge(),
+                        ],
+                      ),
                       const SizedBox(height: 5),
-                      Text('粘贴分享链接，保存原片', style: AppText.brandDesc),
+                      Text('粘贴链接，保存无水印原片',
+                          style: AppText.brandDesc),
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 15),
-            Row(
-              children: [
-                Expanded(
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: kPlatforms
-                        .map((p) => Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.86),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: const Color(0xFFE6E9EF)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Dot(color: p.color, size: 6),
-                                  const SizedBox(width: 5),
-                                  Text(p.name, style: AppText.pill),
-                                ],
-                              ),
-                            ))
-                        .toList(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _ServerChip(state: s),
-              ],
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: kPlatforms
+                  .map((p) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 9, vertical: 5.5),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: const Color(0xFFE8EBF2)),
+                          boxShadow: const [
+                            BoxShadow(
+                                color: Color(0x0A1F2A44),
+                                blurRadius: 4,
+                                offset: Offset(0, 1)),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Dot(color: p.color, size: 6),
+                            const SizedBox(width: 5),
+                            Text(p.name, style: AppText.pill),
+                          ],
+                        ),
+                      ))
+                  .toList(),
             ),
           ],
         ),
@@ -485,67 +493,24 @@ class _HomePageState extends State<HomePage> {
 /* 服务状态小胶囊                                                        */
 /* ==================================================================== */
 
-class _ServerChip extends StatefulWidget {
-  const _ServerChip({required this.state});
-  final AppState state;
-
-  @override
-  State<_ServerChip> createState() => _ServerChipState();
-}
-
-class _ServerChipState extends State<_ServerChip> {
-  bool? _ok;
-
-  @override
-  void initState() {
-    super.initState();
-    _ping();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ServerChip oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // 切换了解析方式就重新判断一次
-    if (oldWidget.state.settings.parseMode != widget.state.settings.parseMode) {
-      _ok = null;
-      _ping();
-    }
-  }
-
-  Future<void> _ping() async {
-    if (AppState.instance.settings.parseMode == 'local') return; // 本地模式不用探测
-    final h = await AppState.instance.checkHealth();
-    if (mounted) setState(() => _ok = h != null);
-  }
+/// 「本地解析」标识。
+///
+/// 【这里以前是什么】原来是个服务连通性探测，会显示「服务未连接」。
+/// 现在解析全在手机里跑，根本没有服务可连 —— 探测那套整个删掉了。
+/// 留一个绿点说明「解析不经过网络」，用户一眼就懂。
+class _LocalBadge extends StatelessWidget {
+  const _LocalBadge();
 
   @override
   Widget build(BuildContext context) {
-    // 本地模式下不该显示「服务未连接」—— 本地解析根本不需要服务，
-    // 那样写会让用户以为 App 坏了。
-    if (AppState.instance.settings.parseMode == 'local') {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Dot(color: AppColors.green, size: 5),
-          const SizedBox(width: 4),
-          Text('本地解析优先',
-              style: AppText.pill.copyWith(fontSize: 10.5, color: const Color(0xFF9AA1AB))),
-        ],
-      );
-    }
-
-    final color = _ok == null
-        ? AppColors.muted
-        : (_ok! ? AppColors.green : AppColors.red);
-    final label = _ok == null
-        ? '检测中'
-        : (_ok! ? '服务已连接' : '服务未连接');
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Dot(color: color, size: 5),
+        const Dot(color: AppColors.green, size: 5),
         const SizedBox(width: 4),
-        Text(label, style: AppText.pill.copyWith(fontSize: 10.5, color: const Color(0xFF9AA1AB))),
+        Text('解析不上网',
+            style: AppText.pill
+                .copyWith(fontSize: 10.5, color: const Color(0xFF9AA1AB))),
       ],
     );
   }
@@ -933,6 +898,46 @@ class _ResultCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                        // 动图标识：不标的话用户不知道这张存下来会动
+                        if (img.isLive)
+                          Positioned(
+                            left: 6,
+                            top: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF5B7CFF), Color(0xFF8A5BFF)],
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                                boxShadow: const [
+                                  BoxShadow(
+                                      color: Color(0x335B7CFF),
+                                      blurRadius: 6,
+                                      offset: Offset(0, 2)),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.play_arrow_rounded,
+                                      size: 11, color: Colors.white),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    img.durationSec > 0
+                                        ? '动图 ${img.durationSec}s'
+                                        : '动图',
+                                    style: const TextStyle(
+                                        fontSize: 10,
+                                        height: 1.1,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         // 勾选框：整块缩略图负责预览，这个小方块负责勾选，
                         // 两者分开，避免「想预览却勾上了」的误操作
                         Positioned(

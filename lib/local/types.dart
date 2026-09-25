@@ -3,14 +3,39 @@
 /// 单独一个文件是为了避免 `registry.dart` 和各个平台实现互相 import 造成循环。
 library;
 
-/// 一张图
+/// 一张图（也可能是"动图"）
 class LocalImage {
   final String url;
   final int width;
   final int height;
-  const LocalImage({required this.url, this.width = 0, this.height = 0});
 
-  Map<String, dynamic> toJson() => {'url': url, 'width': width, 'height': height};
+  /// **动图**对应的短视频地址。非动图时为空字符串。
+  ///
+  /// 抖音的图文作品里，动图（Live Photo）每张都挂着一个**带音轨的短视频** ——
+  /// 存成静态图就把动效和声音丢了。有这个字段，用户就能选「存成动图」。
+  final String videoUrl;
+
+  /// 动图视频的时长（秒），非动图为 0
+  final int durationSec;
+
+  const LocalImage({
+    required this.url,
+    this.width = 0,
+    this.height = 0,
+    this.videoUrl = '',
+    this.durationSec = 0,
+  });
+
+  /// 是不是动图
+  bool get isLive => videoUrl.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'url': url,
+        'width': width,
+        'height': height,
+        if (videoUrl.isNotEmpty) 'videoUrl': videoUrl,
+        if (durationSec > 0) 'durationSec': durationSec,
+      };
 }
 
 /// 一次本地解析的结果
@@ -62,6 +87,9 @@ class LocalResult {
 
   bool get isImages => type == 'images';
   int get imageCount => images.length;
+
+  /// 这条作品里有没有动图
+  bool get hasLivePhotos => images.any((e) => e.isLive);
 }
 
 /// 一个平台的本地解析能力

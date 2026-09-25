@@ -36,78 +36,96 @@ class KuaishouLocalPlatform extends LocalPlatform {
     // 必须用手机 UA：PC 身份会被快手判成「浏览器版本过低」直接拒绝
     await engine.setUserAgent(LocalEngine.mobileUa);
     try {
-      var lastUrl = '';
-      var stable = 0;
-      var sawSomething = false;
+      var r = await _probe(url, const Duration(seconds: 18));
 
-      final r = await engine.evaluatePolling(
-        url,
-        _probeScript,
-        settle: const Duration(milliseconds: 1800),
-        interval: const Duration(milliseconds: 300),
-        timeout: const Duration(seconds: 18),
-        isDone: (v) {
-          if (v is! Map) return false;
-          final video = (v['videoUrl'] ?? '').toString();
-          final imgs = v['images'];
-          final hasImg = imgs is List && imgs.isNotEmpty;
-          if (video.isEmpty && !hasImg) return false;
+      // 【为什么要重试一次】快手偶尔会返回一个**降级页面** ——
+      // 页面能打开、封面图也在，但 `<video>` 是空的，视频地址就拿不到。
+      // 表现是「一条视频作品被解析成图集」，而且是偶发的（同一链接时好时坏）。
+      // 所以：只拿到图、没有视频时，等一会儿重新打开一次。
+      // 真的图集作品第二次结果一样，不会误判成视频。
+      if (r != null && r.videoUrl.isEmpty) {
+        await Future.delayed(const Duration(milliseconds: 900));
+        final retry = await _probe(url, const Duration(seconds: 12));
+        if (retry != null && retry.videoUrl.isNotEmpty) r = retry;
+      }
 
-          sawSomething = true;
-          final key = video.isNotEmpty ? video : 'images:${(imgs as List).length}';
-          if (key == lastUrl) {
-            stable++;
-          } else {
-            stable = 0;
-          }
-          lastUrl = key;
-          // 地址稳定两轮就收工，别让播放器切清晰度把时间拖满
-          return stable >= 2;
-        },
-      );
-
-      if (!sawSomething || r is! Map) {
+      if (r == null) {
         throw const LocalParseError(
             '快手这次没返回内容。可能是作品已删除，或这条分享链接已失效。');
       }
-
-      final videoUrl = (r['videoUrl'] ?? '').toString();
-      final rawImages = r['images'];
-
-      final images = <LocalImage>[];
-      if (rawImages is List) {
-        for (final it in rawImages) {
-          if (it is! Map) continue;
-          final u = (it['url'] ?? '').toString();
-          if (u.isEmpty) continue;
-          images.add(LocalImage(url: u));
-        }
-      }
-
-      // 【有视频就以视频为准】快手的分享页上也会有封面图、推荐位配图，
-      // 它们同样带真实尺寸、能通过图片筛选 —— 早先按「有图就算图集」判断，
-      // 结果一条视频作品被识别成了「图集 2 张」。视频存在时优先级最高。
-      final isVideo = videoUrl.isNotEmpty;
-      if (videoUrl.isEmpty && images.isEmpty) {
+      if (r.videoUrl.isEmpty && r.images.isEmpty) {
         throw const LocalParseError('这条快手作品没有可下载的内容。');
       }
 
-      return LocalResult(
-        platform: key,
-        platformName: name,
-        type: isVideo ? 'video' : 'images',
-        title: (r['title'] ?? '').toString(),
-        author: (r['author'] ?? '').toString(),
-        cover: images.isNotEmpty ? images.first.url : '',
-        videoUrl: videoUrl,
-        referer: referer,
-        images: images,
-        sourceUrl: url,
-      );
+      return r;
     } finally {
       // 还原，别污染后面的平台（抖音图文必须用桌面 UA）
       await engine.setUserAgent(LocalEngine.desktopUa);
     }
+  }
+
+  /// 打开一次分享页并解析。拿不到内容返回 null。
+  Future<LocalResult?> _probe(String url, Duration timeout) async {
+    var lastUrl = '';
+    var stable = 0;
+    var sawSomething = false;
+
+    final r = await LocalEngine.instance.evaluatePolling(
+      url,
+      _probeScript,
+      settle: const Duration(milliseconds: 1800),
+      interval: const Duration(milliseconds: 300),
+      timeout: timeout,
+      isDone: (v) {
+        if (v is! Map) return false;
+        final video = (v['videoUrl'] ?? '').toString();
+        final imgs = v['images'];
+        final hasImg = imgs is List && imgs.isNotEmpty;
+        if (video.isEmpty && !hasImg) return false;
+
+        sawSomething = true;
+        final key = video.isNotEmpty ? video : 'images:${(imgs as List).length}';
+        if (key == lastUrl) {
+          stable++;
+        } else {
+          stable = 0;
+        }
+        lastUrl = key;
+        // 地址稳定两轮就收工，别让播放器切清晰度把时间拖满
+        return stable >= 2;
+      },
+    );
+
+    if (!sawSomething || r is! Map) return null;
+
+    final videoUrl = (r['videoUrl'] ?? '').toString();
+    final rawImages = r['images'];
+
+    final images = <LocalImage>[];
+    if (rawImages is List) {
+      for (final it in rawImages) {
+        if (it is! Map) continue;
+        final u = (it['url'] ?? '').toString();
+        if (u.isEmpty) continue;
+        images.add(LocalImage(url: u));
+      }
+    }
+
+    // 【有视频就以视频为准】快手的分享页上也会有封面图、推荐位配图，
+    // 它们同样带真实尺寸、能通过图片筛选 —— 早先按「有图就算图集」判断，
+    // 结果一条视频作品被识别成了「图集 2 张」。视频存在时优先级最高。
+    return LocalResult(
+      platform: key,
+      platformName: name,
+      type: videoUrl.isNotEmpty ? 'video' : 'images',
+      title: (r['title'] ?? '').toString(),
+      author: (r['author'] ?? '').toString(),
+      cover: images.isNotEmpty ? images.first.url : '',
+      videoUrl: videoUrl,
+      referer: referer,
+      images: images,
+      sourceUrl: url,
+    );
   }
 
   /// 手机分享页的探针。

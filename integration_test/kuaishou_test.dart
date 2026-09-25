@@ -32,20 +32,22 @@ void main() {
     // ignore: avoid_print
     print('[快手] 地址: ${r.videoUrl.length > 120 ? r.videoUrl.substring(0, 120) : r.videoUrl}');
 
-    expect(r.videoUrl.isNotEmpty || r.imageCount > 0, isTrue,
-        reason: '至少要拿到视频或图片');
+    // 【断言要严】原来写的是「视频非空 **或** 图 > 0」，太松 ——
+    // 快手视频一度退化成「图集 1 张」，测试照样绿，回归被放过去了。
+    // 这条链接是**视频**作品，就必须解析成视频。
+    expect(r.type, 'video', reason: '这条链接是视频作品，不该退化成图集');
+    expect(r.videoUrl, isNotEmpty, reason: '必须拿到视频直链');
+    expect(r.videoUrl, contains('http'));
 
-    if (r.videoUrl.isNotEmpty) {
-      final resp = await Dio().get<List<int>>(r.videoUrl,
-          options: Options(
-            responseType: ResponseType.bytes,
-            headers: {'Range': 'bytes=0-2047', 'Referer': r.referer},
-            validateStatus: (s) => s != null && s < 400,
-          ));
-      // ignore: avoid_print
-      print('[快手] 抽查: HTTP ${resp.statusCode}  ${(resp.data ?? []).length} 字节');
-      expect(resp.statusCode, anyOf(200, 206));
-      expect((resp.data ?? []).length, greaterThan(500));
-    }
+    final resp = await Dio().get<List<int>>(r.videoUrl,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: {'Range': 'bytes=0-2047', 'Referer': r.referer},
+          validateStatus: (s) => s != null && s < 400,
+        ));
+    // ignore: avoid_print
+    print('[快手] 抽查: HTTP ${resp.statusCode}  ${(resp.data ?? []).length} 字节');
+    expect(resp.statusCode, anyOf(200, 206));
+    expect((resp.data ?? []).length, greaterThan(500));
   }, timeout: const Timeout(Duration(minutes: 3)));
 }

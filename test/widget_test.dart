@@ -395,7 +395,7 @@ void main() {
     // 另外必须套 runAsync：testWidgets 默认跑在 FakeAsync 里，
     // 真实的网络 IO 在那里永远不会完成，会挂到超时。
     await s.updateSettings(
-      s.settings.copyWith(autoPaste: true, apiBase: 'http://127.0.0.1:1'),
+      s.settings.copyWith(autoPaste: true),
     );
 
     await tester.runAsync(() async {
@@ -531,28 +531,31 @@ void main() {
 
     expect(find.text('解析记录'), findsOneWidget);
     expect(find.text('使用教程'), findsOneWidget);
-    // 解析方式：默认「本地解析」（跑不通会自动回退服务器）
-    expect(find.text('解析方式'), findsOneWidget);
-    expect(find.text('本地解析'), findsOneWidget);
-    expect(find.text('服务器'), findsOneWidget);
     expect(find.text('进 App 自动识别剪贴板'), findsOneWidget);
-    // 「直连下载」只在纯服务器模式下才有意义（本地模式本来就是直连 CDN）
-    expect(find.text('直连下载（省服务器流量）'), findsNothing);
-    expect(find.text('解析服务'), findsOneWidget);
+    expect(find.text('动图存成视频'), findsOneWidget);
+    // 服务器那套已经整体移除，不该再出现在任何地方
+    expect(find.text('解析方式'), findsNothing);
+    expect(find.text('服务器'), findsNothing);
+    expect(find.text('解析服务'), findsNothing);
     expect(find.text('关于小鲸鱼'), findsOneWidget);
   });
 
-  testWidgets('切到服务器模式后，出现直连下载开关', (tester) async {
+  testWidgets('「我的」页不再有服务器相关的设置项', (tester) async {
     await seedAndBoot({});
-    await AppState.instance
-        .updateSettings(AppState.instance.settings.copyWith(parseMode: 'server'));
-
     await tester.pumpWidget(const FlashSaveApp());
     await tester.pump(const Duration(milliseconds: 900));
     await tester.tap(find.text('我的'));
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('直连下载（省服务器流量）'), findsOneWidget);
+    // 解析方式二选一、直连下载开关、解析服务地址 —— 全部移除
+    expect(find.text('本地解析'), findsNothing);
+    expect(find.text('服务器解析'), findsNothing);
+    expect(find.textContaining('直连下载'), findsNothing);
+    expect(find.text('解析服务'), findsNothing);
+
+    // 但偏好开关还在，而且加了动图这项
+    expect(find.text('进 App 自动识别剪贴板'), findsOneWidget);
+    expect(find.text('动图存成视频'), findsOneWidget);
   });
 
   testWidgets('三个 tab 都能来回切', (tester) async {

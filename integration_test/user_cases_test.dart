@@ -3,6 +3,7 @@
 // 这些链接是用户真实报障时给的，必须一直能过 —— 它们覆盖了
 // 「无水印地址没有扩展名 → 被存成 .mp4 → 相册不显示」这个坑。
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -94,6 +95,49 @@ void main() {
       expect(outcome.saved, isTrue, reason: '必须真的存进相册');
     }, timeout: const Timeout(Duration(minutes: 8)));
 
+    testWidgets('抖音动图：解析出图片 + 动图视频（带音轨）', (tester) async {
+      await mountEngineFor(tester);
+      const url = 'https://v.douyin.com/hjkw-7hGFy0/';
+
+      final platform = LocalRegistry.detect(url);
+      expect(platform, isNotNull);
+
+      final r = await platform!.parse(url);
+      // ignore: avoid_print
+      print('[回归E] ${r.type} | ${r.title} | ${r.author} | ${r.imageCount} 项');
+
+      expect(r.imageCount, greaterThan(0));
+
+      // 动图作品：至少有一项带 videoUrl（带音轨的短视频）
+      final live = r.images.where((e) => e.isLive).toList();
+      // ignore: avoid_print
+      print('[回归E] 其中动图 ${live.length} 项');
+      for (final it in live.take(2)) {
+        // ignore: avoid_print
+        print('[回归E]   图: ${it.url.length > 70 ? it.url.substring(0, 70) : it.url}');
+        // ignore: avoid_print
+        print('[回归E]   动图视频: ${it.videoUrl.length > 90 ? it.videoUrl.substring(0, 90) : it.videoUrl}');
+        // ignore: avoid_print
+        print('[回归E]   时长 ${it.durationSec}s');
+      }
+
+      expect(live.isNotEmpty, isTrue, reason: '这条是动图作品，应当解析出视频地址');
+      expect(live.first.videoUrl, contains('douyinvod'),
+          reason: '动图视频应当来自抖音 CDN');
+
+      // 静态图也要能下
+      final ok = await probe(r.images.first.url, r.referer);
+      // ignore: avoid_print
+      print('[回归E] 静态图抽查: HTTP ${ok.status}  ${ok.bytes} 字节  ${ok.type}');
+      expect(ok.status, anyOf(200, 206));
+
+      // 动图视频也要能下
+      final v = await probe(live.first.videoUrl, r.referer);
+      // ignore: avoid_print
+      print('[回归E] 动图视频抽查: HTTP ${v.status}  ${v.bytes} 字节  ${v.type}');
+      expect(v.status, anyOf(200, 206));
+    }, timeout: const Timeout(Duration(minutes: 3)));
+
     testWidgets('抖音：图文分享文案里带干扰字符也能解析', (tester) async {
       await mountEngineFor(tester);
       // 用户给的完整分享文案（前后带表情和时间戳等干扰）
@@ -121,3 +165,30 @@ void main() {
 
 /// 与 App 里同名的辅助（mountEngine 在另一个测试文件里，这里独立一份）
 Future<void> mountEngineFor(WidgetTester tester) => mount(tester);
+
+/// 抽查一个地址是否能取到数据（只取前 8KB）
+Future<({int status, int bytes, String type})> probe(String url, String referer) async {
+  final dio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 15),
+    receiveTimeout: const Duration(seconds: 30),
+    validateStatus: (s) => s != null && s < 500,
+    headers: {
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      if (referer.isNotEmpty) 'Referer': referer,
+      'Range': 'bytes=0-8191',
+    },
+  ));
+  try {
+    final r = await dio.get<List<int>>(url,
+        options: Options(responseType: ResponseType.bytes));
+    final data = r.data ?? const <int>[];
+    return (
+      status: r.statusCode ?? 0,
+      bytes: data.length,
+      type: (r.headers.value('content-type') ?? '').split(';').first,
+    );
+  } on DioException catch (e) {
+    return (status: e.response?.statusCode ?? 0, bytes: 0, type: '');
+  }
+}

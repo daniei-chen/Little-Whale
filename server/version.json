@@ -1,9 +1,9 @@
 {
   "_说明": "小鲸鱼的更新清单（备用副本）。App 优先读 https://whale.kaogong.art/app/version.json，不通时读这份（经 jsDelivr 转发，国内可直连）。",
 
-  "build": 1,
-  "version": "0.0.1",
-  "url": "https://whale.kaogong.art/app/download/xiaojingyu-0.0.1-arm64-v8a.apk",
-  "notes": "首个版本。\n支持抖音、小红书、B站、微博、快手、知乎六个平台，全部本地解析、无需服务器，保存无水印原片。",
+  "build": 2,
+  "version": "0.0.2",
+  "url": "https://whale.kaogong.art/app/download/xiaojingyu-0.0.2-arm64-v8a.apk",
+  "notes": "新增：\n· 抖音动图支持 —— 可存成带动效和音效的短视频，也能只存图片\n· 解析速度提升：抖音图文从 12 秒降到 5 秒左右\n· 保存速度提升：多张图改为并发下载，最多 3 张同时进行\n\n优化：\n· 移除了从未启用的「服务器解析」选项，现在完全本地解析\n· 修复「关于小鲸鱼」点了半天才弹出（原来会先去探测一个已下线的服务）\n· 界面细节调整",
   "force": false
 }

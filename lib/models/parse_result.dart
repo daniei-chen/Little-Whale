@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-/// 一张图文图片
+/// 一张图文图片（也可能是「动图」）
 class ResultImage {
   final String url; // 已带签名的代理地址
   final String? thumb;
@@ -8,13 +8,26 @@ class ResultImage {
   final int height;
   final int index;
 
+  /// **动图**对应的短视频地址。非动图时为空。
+  /// 抖音的图文作品里，动图每张都挂着一个带音轨的短视频 ——
+  /// 有它才能「存成动图」而不是一张死图。
+  final String videoUrl;
+
+  /// 动图视频时长（秒）
+  final int durationSec;
+
   const ResultImage({
     required this.url,
     this.thumb,
     this.width = 0,
     this.height = 0,
     this.index = 0,
+    this.videoUrl = '',
+    this.durationSec = 0,
   });
+
+  /// 是不是动图
+  bool get isLive => videoUrl.isNotEmpty;
 
   factory ResultImage.fromJson(Map<String, dynamic> j) => ResultImage(
         url: (j['url'] ?? '') as String,
@@ -22,6 +35,8 @@ class ResultImage {
         width: (j['width'] as num?)?.toInt() ?? 0,
         height: (j['height'] as num?)?.toInt() ?? 0,
         index: (j['index'] as num?)?.toInt() ?? 0,
+        videoUrl: (j['videoUrl'] ?? '') as String,
+        durationSec: (j['durationSec'] as num?)?.toInt() ?? 0,
       );
 
   Map<String, dynamic> toJson() => {
@@ -30,6 +45,8 @@ class ResultImage {
         'width': width,
         'height': height,
         'index': index,
+        if (videoUrl.isNotEmpty) 'videoUrl': videoUrl,
+        if (durationSec > 0) 'durationSec': durationSec,
       };
 }
 
@@ -147,6 +164,9 @@ class ParseResult {
                 thumb: (e['url'] ?? '') as String,
                 width: (e['width'] as num?)?.toInt() ?? 0,
                 height: (e['height'] as num?)?.toInt() ?? 0,
+                // 动图：把带音轨的短视频地址也带上，UI 才能给「存成动图」的选项
+                videoUrl: (e['videoUrl'] ?? '') as String,
+                durationSec: (e['durationSec'] as num?)?.toInt() ?? 0,
               ))
           .toList(),
       imageCount: images.length,
@@ -154,6 +174,9 @@ class ParseResult {
       parsedAt: DateTime.now().millisecondsSinceEpoch,
     );
   }
+
+  /// 这条作品里有没有动图
+  bool get hasLivePhotos => images.any((e) => e.isLive);
 
   bool get isVideo => type == 'video';
   bool get isImages => type == 'images';

@@ -6,63 +6,43 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/parse_result.dart';
 
 /// 偏好设置
+///
+/// 解析方式已经**只有一种**（手机本地），所以原来那套
+/// `parseMode` / `apiBase` / `directDownload` 全部删掉了 ——
+/// 留着只会在设置页摆一堆用不上的开关。
 class AppSettings {
-  /// 默认保存原片（无平台水印的版本）
-
   /// 进 App 自动读取剪贴板；识别到支持的平台后**直接开始解析**
   final bool autoPaste;
 
-  /// 直连下载：绕过服务器代理，直接向平台 CDN 取流。
-  /// 省服务器流量，但依赖平台反盗链策略，失败会自动回退到代理。
-  final bool directDownload;
-
-  /// 解析方式：
-  ///   'local'  优先在手机里完成（内置 WebView），跑不通时**自动回退服务器**。默认。
-  ///   'server' 只用服务器，不尝试本地
-  final String parseMode;
-
-  /// 解析服务地址（本地模式回退时也会用到）
-  final String apiBase;
+  /// 动图（Live Photo）存成带音轨的短视频，而不是一张静态封面。
+  ///
+  /// 默认开 —— 用户存动图本来就是为了那个动效和声音。
+  /// 想要静态图的可以在设置里关掉。
+  final bool saveLiveAsVideo;
 
   const AppSettings({
     this.autoPaste = true,
-    this.directDownload = false,
-    this.parseMode = 'local',
-    this.apiBase = kDefaultApiBase,
+    this.saveLiveAsVideo = true,
   });
-
-  /// 默认指向 Android 模拟器访问宿主机的特殊地址。
-  /// 正式使用请在「我的 → 解析服务」里改成你自己的域名。
-  static const kDefaultApiBase = 'http://10.0.2.2:8787';
 
   AppSettings copyWith({
     bool? autoPaste,
-    bool? directDownload,
-    String? parseMode,
-    String? apiBase,
+    bool? saveLiveAsVideo,
   }) =>
       AppSettings(
         autoPaste: autoPaste ?? this.autoPaste,
-        directDownload: directDownload ?? this.directDownload,
-        parseMode: parseMode ?? this.parseMode,
-        apiBase: apiBase ?? this.apiBase,
+        saveLiveAsVideo: saveLiveAsVideo ?? this.saveLiveAsVideo,
       );
 
   Map<String, dynamic> toJson() => {
         'autoPaste': autoPaste,
-        'directDownload': directDownload,
-        'parseMode': parseMode,
-        'apiBase': apiBase,
+        'saveLiveAsVideo': saveLiveAsVideo,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> j) => AppSettings(
         // 默认开：老版本存过 false 的用户会保留自己的选择，没存过的走新默认值
         autoPaste: j['autoPaste'] != false,
-        directDownload: j['directDownload'] == true,
-        parseMode: (j['parseMode'] as String?) == 'server' ? 'server' : 'local',
-        apiBase: (j['apiBase'] as String?)?.trim().isNotEmpty == true
-            ? (j['apiBase'] as String).trim()
-            : kDefaultApiBase,
+        saveLiveAsVideo: j['saveLiveAsVideo'] != false,
       );
 }
 

@@ -8,7 +8,6 @@ import '../services/update_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/primitives.dart';
-import 'server_page.dart';
 
 class MinePage extends StatefulWidget {
   const MinePage({super.key});
@@ -79,7 +78,6 @@ class _MinePageState extends State<MinePage> {
                   ]),
                   _groupLabel('解析偏好'),
                   _Group(children: [
-                    _modeCell(s),
                     _switchCell(
                       label: '进 App 自动识别剪贴板',
                       icon: AppIcons.clipboard(AppColors.blue, 14),
@@ -87,26 +85,18 @@ class _MinePageState extends State<MinePage> {
                       subtitle: '识别到支持的链接就直接开始解析',
                       onChanged: (v) => s.updateSettings(s.settings.copyWith(autoPaste: v)),
                     ),
-                    if (s.settings.parseMode == 'server')
-                      _switchCell(
-                        label: '直连下载（省服务器流量）',
-                        icon: AppIcons.link(AppColors.blue, 14),
-                        value: s.settings.directDownload,
-                        subtitle: s.settings.directDownload ? '失败会自动回退到服务器代理' : null,
-                        onChanged: (v) => s.updateSettings(s.settings.copyWith(directDownload: v)),
-                      ),
+                    _switchCell(
+                      label: '动图存成视频',
+                      icon: AppIcons.link(AppColors.blue, 14),
+                      value: s.saveLiveAsVideo,
+                      subtitle: s.saveLiveAsVideo
+                          ? '保留动效与音效，存成短视频'
+                          : '只存静态封面图',
+                      onChanged: s.setSaveLiveAsVideo,
+                    ),
                   ]),
                   _groupLabel('其他'),
                   _Group(children: [
-                    _cell(
-                      context,
-                      icon: AppIcons.server(AppColors.blue, 14),
-                      label: '解析服务',
-                      value: _shortHost(s.settings.apiBase),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const ServerPage()),
-                      ),
-                    ),
                     _cell(
                       context,
                       icon: AppIcons.trash(AppColors.blue, 14),
@@ -147,11 +137,6 @@ class _MinePageState extends State<MinePage> {
     );
   }
 
-  static String _shortHost(String url) {
-    final u = Uri.tryParse(url);
-    if (u == null || u.host.isEmpty) return url;
-    return u.host + (u.hasPort ? ':${u.port}' : '');
-  }
 
   /* ---------------- 个人卡 ---------------- */
 
@@ -300,105 +285,6 @@ class _MinePageState extends State<MinePage> {
     );
   }
 
-  /// 解析方式：本地（内置 WebView，免服务器）/ 服务器（支持更多平台）
-  Widget _modeCell(AppState s) {
-    final isLocal = s.settings.parseMode == 'local';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(13, 12, 13, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _iconBox(AppIcons.server(AppColors.blue, 14)),
-              Text('解析方式', style: AppText.cellLabel),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF2F3F5),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                _modeItem(
-                  title: '本地解析',
-                  note: '免服务器',
-                  on: isLocal,
-                  onTap: () {
-                    if (!isLocal) {
-                      s.updateSettings(s.settings.copyWith(parseMode: 'local'));
-                    }
-                  },
-                ),
-                _modeItem(
-                  title: '服务器',
-                  note: '平台更多',
-                  on: !isLocal,
-                  onTap: () {
-                    if (isLocal) {
-                      s.updateSettings(s.settings.copyWith(parseMode: 'server'));
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            isLocal
-                ? '全程在手机里完成解析，不上传任何链接、不需要服务器。'
-                    '已支持：抖音（视频 / 图文）、小红书、B站、微博、快手、知乎'
-                : '只用服务器解析，不在手机里尝试。服务器需在线',
-            style: const TextStyle(fontSize: 10.5, color: Color(0xFFA0A6AE), height: 1.35),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _modeItem({
-    required String title,
-    required String note,
-    required bool on,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: Pressable(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: on ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: on
-                ? [const BoxShadow(color: Color(0x0F1F2329), blurRadius: 4, offset: Offset(0, 1))]
-                : null,
-          ),
-          child: Column(
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.1,
-                  color: on ? AppColors.blue : const Color(0xFF858C96),
-                  fontWeight: on ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(note,
-                  style: TextStyle(
-                      fontSize: 9.5, height: 1.1, color: on ? const Color(0xFF9AAAFB) : const Color(0xFFA8AEB8))),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _switchCell({
     required String label,
@@ -599,69 +485,60 @@ class _MinePageState extends State<MinePage> {
     ));
   }
 
+  /// 「关于」对话框。
+  ///
+  /// 【改了什么】原来这里会去探测解析服务、显示「服务已连接 / 未连接」和服务地址 ——
+  /// 解析早就不经过服务器了，那段探测和地址展示都是误导。现在只留：
+  /// 版本号、能做什么、隐私说明。信息更少，但每一条都是真的。
   Future<void> _showAbout(BuildContext context) async {
-    final s = AppState.instance;
-    final h = await s.checkHealth();
-    if (!context.mounted) return;
-
-    final adapters = <String>[];
-    if (h != null && h['adapters'] is Map) {
-      (h['adapters'] as Map).forEach((k, v) {
-        if (v is Map && v['name'] != null) {
-          adapters.add('${v['name']}');
-        }
-      });
-    }
-
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('关于小鲸鱼', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('关于小鲸鱼',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('版本 v$kAppVersion', style: TextStyle(fontSize: 13.5, color: AppColors.text2)),
-            const SizedBox(height: 10),
+            Text('版本 v$kAppVersion',
+                style: const TextStyle(fontSize: 13.5, color: AppColors.text2)),
+            const SizedBox(height: 12),
             const Text(
-                '一个多平台内容保存工具，支持抖音、小红书、B站、微博、快手、知乎。',
+                '粘贴分享链接，保存无水印原片。支持抖音、小红书、B站、微博、快手、知乎。',
                 style: TextStyle(fontSize: 13, color: AppColors.text2, height: 1.6)),
-            const SizedBox(height: 10),
-            const Text('解析全程在手机本地完成，不依赖服务器，链接不会外传。',
-                style: TextStyle(fontSize: 13, color: AppColors.text2, height: 1.6)),
-            const SizedBox(height: 10),
-            const Text('所有记录仅保存在你的手机本地，不会上传。',
-                style: TextStyle(fontSize: 13, color: AppColors.text2, height: 1.6)),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.surfaceSoft,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.line),
+                color: const Color(0xFFF1FBF4),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFD6F0DE)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('解析服务：${h != null ? "已连接" : "未连接"}',
-                      style: TextStyle(
-                          fontSize: 11.5,
-                          color: h != null ? AppColors.green : AppColors.red,
-                          fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text(s.settings.apiBase,
-                      style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-                  if (adapters.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text('可用平台：${adapters.join(' / ')}',
-                        style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-                  ],
+                children: const [
+                  Row(children: [
+                    Icon(Icons.lock_outline_rounded,
+                        size: 14, color: Color(0xFF2FA05A)),
+                    SizedBox(width: 6),
+                    Text('解析不经过网络',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            color: Color(0xFF2FA05A),
+                            fontWeight: FontWeight.w600)),
+                  ]),
+                  SizedBox(height: 6),
+                  Text('全部在手机里完成，链接不会上传到任何地方，也不需要服务器。',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF5A7D68), height: 1.6)),
                 ],
               ),
             ),
+            const SizedBox(height: 12),
+            const Text('解析记录只存在你的手机本地。',
+                style: TextStyle(fontSize: 12, color: AppColors.muted)),
           ],
         ),
         actions: [
