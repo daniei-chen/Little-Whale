@@ -15,24 +15,20 @@ const int kAppBuild = 1;
 
 /// 更新清单地址。
 ///
-/// 【为什么走 jsDelivr 而不是 GitHub 原始地址】
-/// `raw.githubusercontent.com` 在国内**被墙**，`github.com` 的 Release 下载
-/// 走 `objects.githubusercontent.com`，国内也基本连不上 ——
-/// 用户不翻墙就拿不到更新。
+/// 【主地址走自己的服务器】国内直连、可控、随时能改。
 ///
-/// 而 **jsDelivr 在国内可以直连**（实测 `cdn.jsdelivr.net` / `fastly.jsdelivr.net`
-/// 都是通的，后者 0.4 秒左右）。它能把 GitHub 仓库里的文件当 CDN 分发，
-/// 所以：**版本文件放 GitHub，更新检测走 jsDelivr，用户完全不需要翻墙，也不用服务器。**
+/// 【为什么不用 GitHub 原始地址】`raw.githubusercontent.com` 在国内**被墙**，
+/// Release 附件走的 `objects.githubusercontent.com` 国内也基本连不上 ——
+/// 用户不翻墙拿不到更新。
 ///
-/// 格式：`https://cdn.jsdelivr.net/gh/{用户}/{仓库}@{分支}/{路径}`
-///
-/// 留空则跳过更新检查。
+/// 备用地址用 **jsDelivr**（它把 GitHub 仓库的文件当 CDN 发，国内实测可直连）。
+/// 两个地址任一可用就能检查到更新，单一渠道挂掉不影响。
 const String kUpdateManifestUrl =
-    'https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json';
+    'https://whale.kaogong.art/app/version.json';
 
-/// 更新检测的备用地址（jsDelivr 主站不通时用这个节点）
+/// 备用地址：jsDelivr 转发同一个仓库里的清单文件
 const String kUpdateManifestUrlAlt =
-    'https://fastly.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json';
+    'https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json';
 
 /// 检查更新的冷却时间：同一个版本一天最多提醒一次，
 /// 免得每次启动都弹窗烦人。

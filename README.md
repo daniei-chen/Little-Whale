@@ -6,23 +6,69 @@
 
 ---
 
-## ⚠️ 关于下载：请不要从 GitHub 下载 APK
+## 📥 下载安装
 
-**GitHub 在国内基本下不动**，具体原因：
+### 主渠道：官网（推荐）
 
-| 域名 | 用途 | 国内直连 |
-|---|---|---|
-| `github.com` | 网页 | ⚠️ 时好时坏 |
-| **`objects.githubusercontent.com`** | **Release 附件（APK 就在这）** | ❌ **基本连不上** |
-| `raw.githubusercontent.com` | 代码/raw | ❌ 被墙 |
+👉 **https://whale.kaogong.art/app/**
 
-**本仓库只托管源码，不提供 APK 下载。**
+国内服务器，直连快且稳，20MB 大约几秒。
 
-👉 **要装 App 请走官网下载页**（国内服务器，直连快且稳）：
-`https://你的域名/app/`
+### 备用：GitHub Releases
 
-> 更新提醒是能正常工作的 —— 版本清单走 jsDelivr（国内可直连），
-> 详见下面的「更新机制」一节。
+如果上面那个打不开（服务器维护等），可以从本仓库的
+[Releases](https://github.com/daniei-chen/Little-Whale/releases) 下载。
+
+> ⚠️ **GitHub 在国内不翻墙基本下不动**，原因：
+>
+> | 域名 | 用途 | 国内直连 |
+> |---|---|---|
+> | `github.com` | 网页 | ⚠️ 时好时坏 |
+> | **`objects.githubusercontent.com`** | **Release 附件（APK 就在这）** | ❌ **基本连不上** |
+> | `raw.githubusercontent.com` | 代码 / raw | ❌ 被墙 |
+>
+> 所以 **官网才是主渠道**，GitHub 只是多一个备份 + 给海外用户用。
+
+---
+
+## 更新机制
+
+App 内建自动检查更新，**不需要用户翻墙**：
+
+```
+主地址   https://whale.kaogong.art/app/version.json          ← 自己的服务器
+备用地址 https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json
+                    ↑ jsDelivr 转发 GitHub 上的同一个文件（国内实测可直连）
+```
+
+两个地址**任一可用**就能检查到更新 —— 单一渠道挂掉不影响用户。
+
+流程：App 启动 3 秒后静默拉清单 → 比对 build 号 → 有新版弹窗 →
+点「立即更新」跳官网下载页。
+
+同一个版本 24 小时内只提醒一次；网络失败静默跳过，**永远不打扰用户**。
+
+### 为什么不用 GitHub Releases 做更新源
+
+因为 App **检查不到、也下不动**（原因见上表）。
+也考虑过 Google 的应用内更新，但国内设备大多没有 Google Play 服务。
+
+### 发版
+
+```powershell
+.\tools\release.ps1 -Notes "新增快手、知乎"
+```
+
+自动改版本号（`pubspec.yaml` / `lib/config.dart` / `server/version.json` 三处同步）→
+跑检查和测试（不过就拒绝发版）→ 构建 APK → 提交推送。
+
+**推完之后还要做两件事**（脚本会在结尾提醒）：
+
+1. 把 APK 传到服务器：`/var/www/whale.kaogong.art/app/download/`
+2. 把 `server/version.json` 的内容同步到
+   `/var/www/whale.kaogong.art/app/version.json`
+
+> 服务器上的清单是**主**，仓库里那份是 jsDelivr 用的**备用副本**，两边要保持一致。
 
 ---
 
@@ -62,25 +108,34 @@ App 会自动重试一次。
 
 ## 更新机制（国内可用）
 
+> 上面「更新机制」一节已经讲过了，这里只留服务器部署要点。
+
+服务器上的目录结构：
+
 ```
-GitHub 仓库的 server/version.json
-        ↓  jsDelivr 转发（国内可直连，实测 0.4 秒）
-   App 启动时拉取 → 比对 build 号 → 有新版就弹窗
-        ↓  点「立即更新」
-   打开官网下载页（你自己的服务器，国内直连）
-```
-
-**为什么不用 GitHub Releases**：附件走 `objects.githubusercontent.com`，国内下不动。
-**为什么不用 Google 应用内更新**：国内设备大多没有 Google Play 服务。
-
-改版本只要一条命令：
-
-```powershell
-.\tools\release.ps1 -Notes "新增快手、知乎"
+/var/www/whale.kaogong.art/
+├── index.html                        跳转到 /app/
+└── app/
+    ├── index.html                    下载页
+    ├── icon.png                      下载页上的图标
+    ├── version.json                  ★ 更新清单（App 主地址读这个）
+    └── download/
+        └── xiaojingyu-0.0.1-arm64-v8a.apk
 ```
 
-它会自动改版本号（`pubspec.yaml` / `lib/config.dart` / `server/version.json` 三处）、
-跑检查和测试、构建三个 ABI 的 APK、提交推送。推上去后 jsDelivr 会自动生效。
+Nginx 配置在 `/etc/nginx/sites-available/whale.kaogong.art`，
+HTTPS 由 certbot 签发并自动续期。
+
+**发版后要做的两步**：
+
+```bash
+# 1. 传 APK
+scp 新包.apk xiaochen:/var/www/whale.kaogong.art/app/download/xiaojingyu-新版本-arm64-v8a.apk
+
+# 2. 同步更新清单（两个地方都要改，保持一致）
+#    · 服务器：/var/www/whale.kaogong.art/app/version.json
+#    · 仓库：  server/version.json   （jsDelivr 备用地址读这份）
+```
 
 ---
 
