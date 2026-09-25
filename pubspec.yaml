@@ -2,7 +2,7 @@ name: flashsave
 description: "小鲸鱼 —— 多平台视频/图文链接解析与保存工具，本地解析、保存无水印原片"
 publish_to: 'none'
 
-version: 0.0.3+3
+version: 0.0.4+4
 
 environment:
   sdk: ^3.13.3

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 能对外暴露的路径白名单。
+
+  更新包下载到「应用内部缓存目录」，只把 cache 下的 apk 子目录暴露出去 ——
+  范围越小越安全，不要图省事写整个外部存储。
+-->
+<paths>
+    <!-- getExternalCacheDir()/apk/xxx.apk -->
+    <external-cache-path
+        name="apk_external"
+        path="apk/" />
+    <!-- getCacheDir()/apk/xxx.apk（没有外部存储时用这个） -->
+    <cache-path
+        name="apk_internal"
+        path="apk/" />
+</paths>

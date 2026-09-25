@@ -95,6 +95,47 @@ void main() {
       expect(outcome.saved, isTrue, reason: '必须真的存进相册');
     }, timeout: const Timeout(Duration(minutes: 8)));
 
+    testWidgets('小红书动图：解析出封面 + 带音轨的动图视频', (tester) async {
+      await mountEngineFor(tester);
+      const url = 'https://xhslink.cn/o/4jQ9QQoGaQb';
+
+      final platform = LocalRegistry.detect(url);
+      expect(platform, isNotNull, reason: '应当被识别为小红书');
+
+      final r = await platform!.parse(url);
+      // ignore: avoid_print
+      print('[回归F] ${r.type} | ${r.title} | ${r.author} | ${r.imageCount} 项');
+      expect(r.imageCount, greaterThan(0));
+
+      final live = r.images.where((e) => e.isLive).toList();
+      // ignore: avoid_print
+      print('[回归F] 其中动图 ${live.length} 项（共 ${r.imageCount}）');
+      expect(live.isNotEmpty, isTrue,
+          reason: '这条是 18 张动图的作品，必须能识别出动图');
+
+      final first = live.first;
+      // ignore: avoid_print
+      print('[回归F] 封面: ${first.url.length > 80 ? first.url.substring(0, 80) : first.url}');
+      // ignore: avoid_print
+      print('[回归F] 动图视频: ${first.videoUrl.length > 90 ? first.videoUrl.substring(0, 90) : first.videoUrl}');
+      // ignore: avoid_print
+      print('[回归F] 时长 ${first.durationSec}s');
+
+      expect(first.videoUrl, contains('xhscdn'), reason: '动图视频应当来自小红书 CDN');
+      expect(first.durationSec, greaterThan(0), reason: '应当拿到时长');
+
+      // 两个都要能下
+      final img = await probe(first.url, r.referer);
+      // ignore: avoid_print
+      print('[回归F] 封面抽查: HTTP ${img.status}  ${img.bytes} 字节  ${img.type}');
+      expect(img.status, anyOf(200, 206));
+
+      final vid = await probe(first.videoUrl, r.referer);
+      // ignore: avoid_print
+      print('[回归F] 动图视频抽查: HTTP ${vid.status}  ${vid.bytes} 字节  ${vid.type}');
+      expect(vid.status, anyOf(200, 206));
+      expect(vid.type, contains('video'), reason: '动图地址必须是视频');
+    }, timeout: const Timeout(Duration(minutes: 3)));
     testWidgets('抖音动图：解析出图片 + 动图视频（带音轨）', (tester) async {
       await mountEngineFor(tester);
       const url = 'https://v.douyin.com/hjkw-7hGFy0/';

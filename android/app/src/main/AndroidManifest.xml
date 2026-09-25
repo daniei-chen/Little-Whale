@@ -14,6 +14,13 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"/>
 
+    <!--
+      应用内更新：下载完新版本后拉起系统安装器。
+      这只是「允许本 App 发起安装」，用户仍会在系统弹窗里再确认一次 ——
+      Android 不允许静默安装，这是安全设计。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
     <application
         android:label="小鲸鱼"
         android:name="${applicationName}"
@@ -21,6 +28,23 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
+
+        <!--
+          把下载好的更新包交给系统安装器。
+          Android 7.0 起禁止直接传 file:// URI（会抛 FileUriExposedException），
+          必须通过 FileProvider 转成 content:// 并临时授权。
+          路径白名单见 res/xml/file_paths.xml —— 只暴露 cache/apk/。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

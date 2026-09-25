@@ -371,7 +371,17 @@ class XiaohongshuLocalPlatform extends LocalPlatform {
       final clean = noWatermarkImage(im.url);
       return clean == null
           ? im
-          : LocalImage(url: clean, width: im.width, height: im.height);
+          // 【必须把动图字段一起带过去】
+          // 这里原来是 `LocalImage(url: clean, width: .., height: ..)` ——
+          // 新建对象时漏了 videoUrl/durationSec，结果动图信息在这一步被丢光，
+          // 表现是「18 张动图，一张都识别不出来」。
+          : LocalImage(
+              url: clean,
+              width: im.width,
+              height: im.height,
+              videoUrl: im.videoUrl,
+              durationSec: im.durationSec,
+            );
     })
         .toList();
 
@@ -379,11 +389,27 @@ class XiaohongshuLocalPlatform extends LocalPlatform {
     if (cleanImages.isNotEmpty &&
         rawImages.isNotEmpty &&
         cleanImages.first.url != rawImages.first.url) {
-      final ok = await _probeOk(
+      final probe = await _probeOkDetail(
         cleanImages.first.url,
         noWatermarkImageAlt(rawImages.first.url),
       );
-      if (ok) images = cleanImages;
+      if (probe.ok) {
+        images = cleanImages;
+        // 【HEIC → JPEG】老安卓解不了 HEIC，相册里会是一张看不见的图。
+        // 同地址加格式参数就能拿到等分辨率的 JPEG，整组统一换掉。
+        if (probe.heic) {
+          images = cleanImages
+              .map((im) => LocalImage(
+                    url: _asJpeg(im.url),
+                    width: im.width,
+                    height: im.height,
+                    // 动图信息要带着 —— 这里新建对象漏过一次，18 张动图全丢了
+                    videoUrl: im.videoUrl,
+                    durationSec: im.durationSec,
+                  ))
+              .toList();
+        }
+      }
     }
 
     // ---- 视频：优先用 originVideoKey 拼的原始对象（无水印）----
@@ -392,7 +418,7 @@ class XiaohongshuLocalPlatform extends LocalPlatform {
     final originKey = _originVideoKey(note);
     final cleanVideo = noWatermarkVideo(originKey);
     if (cleanVideo != null) {
-      if (await _probeOk(cleanVideo, null)) {
+      if ((await _probeOkDetail(cleanVideo, null)).ok) {
         videoUrl = cleanVideo;
       }
     }
@@ -455,7 +481,16 @@ class XiaohongshuLocalPlatform extends LocalPlatform {
   }
 
   /// 抽查地址能不能取到数据（只取 1KB）。拿不到就试备选，都拿不到返回 false。
-  Future<bool> _probeOk(String primary, String? alt) async {
+  /// 抽验第一张图能不能下 —— 顺带把是否为 HEIC 告诉调用方。
+  ///
+  /// 【为什么要关心 HEIC】动图笔记的封面 CDN 返回 `image/heic`。
+  /// Android 10+ 能解，但我们 minSdk 是 24（Android 7），
+  /// 老设备解码不了 —— 表现是「存进相册了却看不见」，很难查。
+  /// 好在同一条地址加 `?imageView2/format/jpg` 就能拿到**同分辨率**的 JPEG
+  /// （实测 175 KB → 173 KB，不是压缩，只是换容器）。
+  Future<({bool ok, bool heic})> _probeOkDetail(String primary, String? alt) async {
+    var ok = false;
+    var heic = false;
     for (final u in [primary, if (alt != null && alt.isNotEmpty) alt]) {
       try {
         final r = await _dio.get<List<int>>(u,
@@ -463,13 +498,32 @@ class XiaohongshuLocalPlatform extends LocalPlatform {
               responseType: ResponseType.bytes,
               headers: const {'Range': 'bytes=0-1023'},
             ));
-        final n = (r.data ?? const <int>[]).length;
-        if ((r.statusCode == 200 || r.statusCode == 206) && n > 200) return true;
+        final bytes = r.data ?? const <int>[];
+        if ((r.statusCode == 200 || r.statusCode == 206) && bytes.length > 200) {
+          ok = true;
+          final ct = (r.headers.value('content-type') ?? '').toLowerCase();
+          // 两重判断：content-type 会说谎，再对文件头（bytes 4-12 = "ftypheic" 等）
+          final magic = String.fromCharCodes(
+              bytes.length >= 12 ? bytes.sublist(4, 12) : const <int>[]);
+          heic = ct.contains('heic') ||
+              ct.contains('heif') ||
+              magic.startsWith('ftyphei') ||
+              magic.startsWith('ftypmif');
+          if (heic) return (ok: true, heic: true);
+          return (ok: true, heic: false);
+        }
       } catch (_) {
         // 试下一个
       }
     }
-    return false;
+    return (ok: ok, heic: heic);
+  }
+
+  /// 把 HEIC 换成同分辨率的 JPEG。
+  /// 用 `imageMogr2` 而不是 `!h5_1080jpg` —— 后者是**加水印**的模板。
+  String _asJpeg(String url) {
+    if (url.contains('?')) return url;
+    return '$url?imageView2/format/jpg';
   }
 
   List<LocalImage> _buildImages(Map<String, dynamic> note) {
@@ -497,13 +551,67 @@ class XiaohongshuLocalPlatform extends LocalPlatform {
           .toString();
       final url = detail.isNotEmpty ? detail : main;
       if (url.isEmpty) continue;
+
+      // ---- 动图（Live Photo）----
+      //
+      // 小红书从 2024 年起大量推「动图」笔记：静态封面 + 一段 2~3 秒的短视频。
+      // 数据长这样：
+      //   { "livePhoto": true,
+      //     "url": ".../notes_pre_post/xxx",            ← 封面图
+      //     "stream": { "h264": [{ "masterUrl": "...mp4?sign=...",
+      //                            "videoDuration": 2933 }] } }
+      //
+      // 只取封面的话，用户拿到的就是一张死图 —— 动效和声音全丢。
+      final isLive = it['livePhoto'] == true || it['live_photo'] == true;
+      final liveUrl = isLive ? _liveVideoUrl(it) : '';
+      final liveSec = isLive ? _liveVideoSeconds(it) : 0;
+
       out.add(LocalImage(
         url: _https(url),
         width: (it['width'] as num?)?.toInt() ?? 0,
         height: (it['height'] as num?)?.toInt() ?? 0,
+        videoUrl: liveUrl,
+        durationSec: liveSec,
       ));
     }
     return out;
+  }
+
+  /// 动图的视频地址。
+  ///
+  /// 优先 h264 —— 兼容性最好，而且**带音轨**（动图的意义就在声音和动效）。
+  String _liveVideoUrl(Map<dynamic, dynamic> it) {
+    final st = it['stream'];
+    if (st is! Map) return '';
+    for (final codec in ['h264', 'h265', 'av1']) {
+      final arr = st[codec];
+      if (arr is! List) continue;
+      for (final e in arr) {
+        if (e is! Map) continue;
+        final u = (e['masterUrl'] ?? e['master_url'] ?? '').toString();
+        if (u.isNotEmpty) return _https(u);
+        // 兜底：有的版本只给 backupUrls
+        final bk = e['backupUrls'] ?? e['backup_urls'];
+        if (bk is List && bk.isNotEmpty) return _https('${bk.first}');
+      }
+    }
+    return '';
+  }
+
+  /// 动图时长（秒）。小红书给的是毫秒。
+  int _liveVideoSeconds(Map<dynamic, dynamic> it) {
+    final st = it['stream'];
+    if (st is! Map) return 0;
+    for (final codec in ['h264', 'h265', 'av1']) {
+      final arr = st[codec];
+      if (arr is! List || arr.isEmpty) continue;
+      final e = arr.first;
+      if (e is! Map) continue;
+      final ms = (e['videoDuration'] ?? e['video_duration'] ?? e['duration'] as num?)
+          ?.toInt();
+      if (ms != null && ms > 0) return (ms / 1000).round();
+    }
+    return 0;
   }
 
   /// 取分辨率最高的一条。h264 → h265 → av1 依次回退。

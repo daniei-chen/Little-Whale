@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config.dart';
@@ -11,12 +14,17 @@ class UpdateInfo {
   final String notes;
   final bool force;
 
+  /// 安装包大小（字节）。清单里没给就是 0 ——
+  /// 用来判断「上次是不是已经下完了」，以及显示进度。
+  final int size;
+
   const UpdateInfo({
     required this.build,
     required this.version,
     required this.url,
     this.notes = '',
     this.force = false,
+    this.size = 0,
   });
 
   /// 从服务器的 version.json 解析
@@ -38,6 +46,7 @@ class UpdateInfo {
       url: target,
       notes: (raw['notes'] ?? '').toString(),
       force: raw['force'] == true,
+      size: (raw['size'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -100,5 +109,57 @@ class UpdateService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_prefsKey, build);
     } catch (_) {}
+  }
+  /* ------------------------------------------------------------------ */
+  /* 应用内下载新版本                                                     */
+  /* ------------------------------------------------------------------ */
+
+  /// 把新版本 APK 下到应用缓存目录，返回文件路径。
+  ///
+  /// 【为什么要下到缓存目录而不是相册】
+  /// 更新包是临时的，不该出现在用户的相册里。放 cache/apk/ 下：
+  /// 系统空间紧张时能自动回收，也不会污染用户的照片。
+  /// FileProvider 的白名单里只暴露了这个目录（见 res/xml/file_paths.xml）。
+  Future<String> downloadApk(
+    UpdateInfo info, {
+    void Function(double progress, int received, int total)? onProgress,
+  }) async {
+    final dir = Directory('${(await getTemporaryDirectory()).path}/apk');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+
+    // 文件名带版本和构建号，避免和上一版混淆（也便于续传时识别）
+    final file = File('${dir.path}/xiaojingyu-${info.version}-${info.build}.apk');
+
+    // 已经下好且大小对得上，直接复用 —— 用户可能点了取消又想装
+    if (await file.exists() && info.size > 0 && await file.length() == info.size) {
+      onProgress?.call(1, info.size, info.size);
+      return file.path;
+    }
+
+    final done = file.existsSync() ? await file.length() : 0;
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(minutes: 30),
+      validateStatus: (s) => s != null && s < 400,
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+      },
+    ));
+
+    await dio.download(
+      info.url,
+      file.path,
+      // 断点续传：上次下到一半就接着下
+      options: Options(headers: done > 0 ? {'Range': 'bytes=$done-'} : null),
+      deleteOnError: false,
+      onReceiveProgress: (received, total) {
+        final full = total > 0 ? total + done : (info.size > 0 ? info.size : 0);
+        final got = received + done;
+        onProgress?.call(full > 0 ? (got / full).clamp(0, 1) : 0, got, full);
+      },
+    );
+
+    return file.path;
   }
 }
