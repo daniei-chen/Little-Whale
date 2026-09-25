@@ -13,12 +13,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flashsave/main.dart';
+import 'package:flashsave/local/types.dart';
 import 'package:flashsave/local/registry.dart';
 import 'package:flashsave/config.dart';
 import 'package:flashsave/data/platforms.dart';
 import 'package:flashsave/data/local_store.dart';
 import 'package:flashsave/models/parse_result.dart';
 import 'package:flashsave/services/download_service.dart';
+import 'package:flashsave/widgets/net_image.dart';
 import 'package:flashsave/services/update_service.dart';
 import 'package:flashsave/state/app_state.dart';
 
@@ -576,6 +578,77 @@ void main() {
     await tester.tap(find.text('解析').first);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('开始解析'), findsOneWidget);
+  });
+  group('本轮新增代码的单元测试', () {
+    // ---------------------------------------------------------------
+    // 更新清单解析（含安装包大小）
+    // ---------------------------------------------------------------
+    test('更新清单：能解析 size，缺 size 也不崩', () {
+      final withSize = UpdateInfo.fromJson({
+        'build': 9,
+        'version': '1.0.0',
+        'url': 'https://example.com/a.apk',
+        'size': 20971520,
+      });
+      expect(withSize, isNotNull);
+      expect(withSize!.size, 20971520);
+
+      // 老清单没有 size —— 不能因此判定为脏数据
+      final noSize = UpdateInfo.fromJson({
+        'build': 9,
+        'version': '1.0.0',
+        'url': 'https://example.com/a.apk',
+      });
+      expect(noSize, isNotNull);
+      expect(noSize!.size, 0, reason: '缺 size 时应当是 0，而不是拒绝这条更新');
+    });
+
+    // ---------------------------------------------------------------
+    // 图片按显示尺寸解码
+    // ---------------------------------------------------------------
+    test('imageCacheWidth：随像素密度缩放，且有上下限', () {
+      // 只验证边界：真实 DPR 由运行环境决定，测试里不方便伪造
+      final w = imageCacheWidth(150);
+      expect(w, greaterThanOrEqualTo(64), reason: '不能小于 64');
+      expect(w, lessThanOrEqualTo(720), reason: '不能大于 720（列表缩略图没必要更大）');
+
+      // 极端小的请求也要被夹到下限
+      expect(imageCacheWidth(1), 64);
+      // 极端大的请求要被夹到上限
+      expect(imageCacheWidth(100000), 720);
+    });
+
+    // ---------------------------------------------------------------
+    // 动图字段在模型之间不能丢
+    // ---------------------------------------------------------------
+    test('LocalImage 的动图字段能正确往返 JSON', () {
+      const live = LocalImage(
+        url: 'https://example.com/a.jpg',
+        width: 100,
+        height: 200,
+        videoUrl: 'https://example.com/a.mp4',
+        durationSec: 3,
+      );
+      expect(live.isLive, isTrue);
+
+      final back = LocalImage(
+        url: live.toJson()['url'] as String,
+        width: live.toJson()['width'] as int,
+        height: live.toJson()['height'] as int,
+        videoUrl: (live.toJson()['videoUrl'] ?? '') as String,
+        durationSec: (live.toJson()['durationSec'] ?? 0) as int,
+      );
+      expect(back.videoUrl, live.videoUrl);
+      expect(back.durationSec, live.durationSec);
+      expect(back.isLive, isTrue);
+    });
+
+    test('普通图片不会被误判成动图', () {
+      const plain = LocalImage(url: 'https://example.com/a.jpg');
+      expect(plain.isLive, isFalse);
+      expect(plain.toJson().containsKey('videoUrl'), isFalse,
+          reason: '非动图不该写出空的 videoUrl 字段');
+    });
   });
 }
 

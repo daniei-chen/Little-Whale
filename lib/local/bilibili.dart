@@ -276,15 +276,31 @@ class BilibiliLocalPlatform extends LocalPlatform {
   /// 图片在 `data.item.modules.module_dynamic.major.draw.items[].src`，
   /// 新版也有 `major.opus.pics[].url` —— 两种都兼容。
   Future<LocalResult> _parseOpus(String dynId, String url) async {
-    final q = await _signedQuery({'id': dynId, 'timezone_offset': '-480'});
-    final r = await _dio.get<Map<String, dynamic>>(
-      'https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?$q',
-    );
-    final body = r.data ?? const {};
+    // 【为什么要重试】实测里这条也撞过限流：稳定性连跑时第一轮还好好的，
+    // 第二轮就抛错。B站对动态详情接口同样有频率风控，退避一下就好，
+    // 没必要让用户看到失败。
+    Map<String, dynamic> body = const {};
+    for (var attempt = 0; attempt < 4; attempt++) {
+      final q = await _signedQuery({'id': dynId, 'timezone_offset': '-480'});
+      final r = await _dio.get<Map<String, dynamic>>(
+        'https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?$q',
+      );
+      body = r.data ?? const {};
+      final c = (body['code'] as num?)?.toInt() ?? -1;
+      if (c == 0) break;
+
+      final msg = (body['message'] ?? '').toString();
+      final busy = c == -509 || c == -412 || c == -352 || msg.contains('频繁');
+      if (busy && attempt < 3) {
+        await Future.delayed(Duration(milliseconds: 1200 * (1 << attempt)));
+        continue;
+      }
+      throw LocalParseError('B站没返回这条动态（${msg.isEmpty ? c : msg}）。可能已被删除，或需要登录。');
+    }
+
     final code = (body['code'] as num?)?.toInt() ?? -1;
     if (code != 0) {
-      throw LocalParseError(
-          'B站没返回这条动态（${body['message'] ?? code}）。可能已被删除，或需要登录。');
+      throw const LocalParseError('B站暂时限制了访问频率，等十几秒再试一次。');
     }
 
     final data = body['data'];

@@ -29,6 +29,7 @@ class ZhihuLocalPlatform extends LocalPlatform {
   static final _articleRe = RegExp(r'zhuanlan\.zhihu\.com/p/(\d+)');
   static final _answerRe = RegExp(r'/question/(\d+)/answer/(\d+)');
   static final _pinRe = RegExp(r'zhihu\.com/pin/(\d+)');
+  static final _zvideoRe = RegExp(r'/zvideo/(\d+)');
 
   /* ------------------------------------------------------------------ */
 
@@ -36,6 +37,22 @@ class ZhihuLocalPlatform extends LocalPlatform {
   Future<LocalResult> parse(String url) async {
     final engine = LocalEngine.instance;
     await engine.setUserAgent(LocalEngine.desktopUa);
+
+    // 知乎视频（zvideo）单独给提示。
+    //
+    // 实测：知乎未登录时**拿不到任何视频内容** —— 首页 SSR 里出现的 `zvideo`
+    // 全是空的 store 命名空间（`"zvideos":{}`），相关接口清一色
+    // 401「身份未经过验证」。这是平台的登录策略，不是我们没做。
+    //
+    // 与其让用户看到含糊的「不支持这个链接」，不如直接说清楚该怎么办。
+    if (_zvideoRe.hasMatch(url)) {
+      throw const LocalParseError(
+        '知乎视频需要登录才能看 —— 未登录时知乎不返回任何视频内容。\n\n'
+        '知乎上**不需要登录**的只有专栏文章：\n'
+        'zhuanlan.zhihu.com/p/…\n'
+        '在知乎 App 里：进作者主页 → 文章 → 选一篇 → 分享 → 复制链接。',
+      );
+    }
 
     final isAnswer = _answerRe.hasMatch(url);
 

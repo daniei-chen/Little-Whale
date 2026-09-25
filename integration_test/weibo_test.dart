@@ -52,7 +52,12 @@ void main() {
     final j = (hot is Map) ? hot : jsonDecode(hot.toString()) as Map;
     final cards = (j['data']?['cards'] as List?) ?? [];
 
-    // 翻出**带图**和**带视频**的两条（热榜里大多是纯文字）
+    // 【为什么要兜底 ID】热榜里大多是纯文字微博，「翻一条带图的」经常翻不到 ——
+    // 原来那样写，翻不到就 if 跳过，测试照样绿。**等于图文路径根本没被测**。
+    // 实测就撞到过：三次运行里有两次 (没找到)，却都是 All tests passed。
+    // 所以这里给一条固定的带图微博做兜底，并且最后断言「两条路径都必须真的跑到」。
+    const fallbackPicId = '5339732289520397';
+
     var picId = '';
     var videoId = '';
     for (final c in cards) {
@@ -68,49 +73,54 @@ void main() {
       }
       if (picId.isNotEmpty && videoId.isNotEmpty) break;
     }
+    final fromFeed = picId.isNotEmpty;
+    if (!fromFeed) picId = fallbackPicId;
+
     // ignore: avoid_print
-    print('[微博] 带图 id=${picId.isEmpty ? "(没找到)" : picId}  视频 id=${videoId.isEmpty ? "(没找到)" : videoId}');
+    print('[微博] 带图 id=$picId（${fromFeed ? "热榜翻到的" : "用兜底 ID"}）  视频 id=${videoId.isEmpty ? "(没找到)" : videoId}');
 
     final platform = LocalRegistry.detect('https://m.weibo.cn/detail/$picId');
     expect(platform, isNotNull, reason: '应当被识别为微博');
 
-    if (picId.isNotEmpty) {
-      final r = await platform!.parse('https://m.weibo.cn/detail/$picId');
-      // ignore: avoid_print
-      print('[微博·图] ${r.type} | ${_cut(r.title, 30)} | ${r.author} | ${r.imageCount} 张');
-      expect(r.type, 'images');
-      expect(r.imageCount, greaterThan(0));
+    // 图文路径 —— 必须真的跑到，不允许静默跳过
+    final r = await platform!.parse('https://m.weibo.cn/detail/$picId');
+    // ignore: avoid_print
+    print('[微博·图] ${r.type} | ${_cut(r.title, 30)} | ${r.author} | ${r.imageCount} 张');
+    expect(r.type, 'images',
+        reason: '这条微博是带图的，必须解析成图文（id=$picId）');
+    expect(r.imageCount, greaterThan(0), reason: '至少要有一张图');
 
-      final u = r.images.first.url;
-      // ignore: avoid_print
-      print('[微博·图] 首图: ${_cut(u, 110)}');
-      // 原图应当是 /large/，不能是 /thumbnail/ 或 /bmiddle/
-      expect(u.contains('/large/') || u.contains('/orj'), isTrue,
-          reason: '要原图，不能是缩略图');
+    final u = r.images.first.url;
+    // ignore: avoid_print
+    print('[微博·图] 首图: ${_cut(u, 110)}');
+    // 原图应当是 /large/，不能是 /thumbnail/ 或 /bmiddle/
+    expect(u.contains('/large/') || u.contains('/orj'), isTrue,
+        reason: '要原图，不能是缩略图');
 
-      final resp = await Dio().get<List<int>>(u,
-          options: Options(
-            responseType: ResponseType.bytes,
-            headers: const {
-              'Range': 'bytes=0-4095',
-              'Referer': 'https://m.weibo.cn/',
-            },
-            validateStatus: (s) => s != null && s < 400,
-          ));
-      // ignore: avoid_print
-      print('[微博·图] 下载: HTTP ${resp.statusCode}  ${(resp.data ?? []).length} 字节');
-      expect(resp.statusCode, anyOf(200, 206));
-    }
+    final resp = await Dio().get<List<int>>(u,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: const {
+            'Range': 'bytes=0-4095',
+            'Referer': 'https://m.weibo.cn/',
+          },
+          validateStatus: (s) => s != null && s < 400,
+        ));
+    // ignore: avoid_print
+    print('[微博·图] 下载: HTTP ${resp.statusCode}  ${(resp.data ?? []).length} 字节');
+    expect(resp.statusCode, anyOf(200, 206));
 
-    if (videoId.isNotEmpty) {
-      final r = await platform!.parse('https://m.weibo.cn/detail/$videoId');
-      // ignore: avoid_print
-      print('[微博·视频] ${r.type} | ${_cut(r.title, 30)} | ${r.author}');
-      // ignore: avoid_print
-      print('[微博·视频] 地址: ${_cut(r.videoUrl, 110)}');
-      expect(r.type, 'video');
-      expect(r.videoUrl.startsWith('http'), isTrue);
-    }
+    // 视频路径 —— 热榜偶尔没有视频微博，那就用固定 ID 兜底，同样不允许跳过
+    const fallbackVideoId = '5330126201949004';
+    if (videoId.isEmpty) videoId = fallbackVideoId;
+
+    final vr = await platform.parse('https://m.weibo.cn/detail/$videoId');
+    // ignore: avoid_print
+    print('[微博·视频] ${vr.type} | ${_cut(vr.title, 30)} | ${vr.author}');
+    // ignore: avoid_print
+    print('[微博·视频] 地址: ${_cut(vr.videoUrl, 110)}');
+    expect(vr.type, 'video', reason: '这条是视频微博（id=$videoId）');
+    expect(vr.videoUrl.startsWith('http'), isTrue);
   }, timeout: const Timeout(Duration(minutes: 4)));
 
   testWidgets('微博：weibo.com 的 base62 短 ID 也能识别', (tester) async {
