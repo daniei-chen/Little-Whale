@@ -67,8 +67,12 @@ void main() {
     } on LocalParseError catch (e) {
       // ignore: avoid_print
       print('[知乎] 回答页提示: ${e.message.split("\n").first}');
-      expect(e.message.contains('专栏') || e.message.contains('服务器'), isTrue,
-          reason: '要给出可操作的替代方案');
+      // 提示里必须给出**真能用的**替代方案。
+      // 注意：不要再提「服务器模式」—— 那个功能已经从 App 里移除了，
+      // 让用户去点一个不存在的开关，比不给建议还糟。
+      expect(e.message.contains('专栏'), isTrue, reason: '要指出专栏链接可用');
+      expect(e.message.contains('服务器'), isFalse,
+          reason: '服务器模式已经删了，不能再建议用户去切');
     }
   }, timeout: const Timeout(Duration(minutes: 3)));
 }

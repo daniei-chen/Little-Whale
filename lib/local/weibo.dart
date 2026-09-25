@@ -252,9 +252,63 @@ class WeiboLocalPlatform extends LocalPlatform {
       var url = large is Map ? (large['url'] ?? '').toString() : '';
       if (url.isEmpty) url = (p['url'] ?? '').toString();
       if (url.isEmpty) continue;
-      out.add(LocalImage(url: _toOriginal(_https(url))));
+
+      // ---- 动图（Live Photo）----
+      //
+      // 【说明】微博的 Live Photo 是「静态封面 + 一段短视频」。真实结构
+      // 各版本字段名不统一，这里把常见形态都试一遍：
+      //   · `live_photo` / `livePhoto` 直接给地址
+      //   · `video` / `video_url` / `stream` 给字符串或对象
+      //   · 对象里再找 `url` / `url_list[0]` / `mp4`
+      //
+      // 试不到就照旧存静态图 —— **没有任何副作用**，只是少一个动图选项。
+      final live = _livePhoto(p);
+
+      out.add(LocalImage(
+        url: _toOriginal(_https(url)),
+        videoUrl: live.url,
+        durationSec: live.seconds,
+      ));
     }
     return out;
+  }
+
+  /// 从一张图里找它的动图视频。找不到返回空。
+  ({String url, int seconds}) _livePhoto(Map<dynamic, dynamic> p) {
+    dynamic dig(dynamic v, int depth) {
+      if (v == null || depth > 3) return null;
+      if (v is String) return v.startsWith('http') ? v : null;
+      if (v is List) {
+        for (final e in v) {
+          final r = dig(e, depth + 1);
+          if (r != null) return r;
+        }
+        return null;
+      }
+      if (v is Map) {
+        for (final k in ['url', 'url_list', 'mp4', 'mp4_url', 'src', 'play_url']) {
+          final r = dig(v[k], depth + 1);
+          if (r != null) return r;
+        }
+      }
+      return null;
+    }
+
+    for (final key in ['live_photo', 'livePhoto', 'video', 'video_url', 'stream']) {
+      final v = p[key];
+      if (v == null) continue;
+      final s = dig(v, 0);
+      if (s != null) {
+        // 时长：对象里可能有 duration（毫秒）
+        var sec = 0;
+        if (v is Map) {
+          final d = (v['duration'] as num?)?.toInt();
+          if (d != null && d > 0) sec = d > 1000 ? (d / 1000).round() : d;
+        }
+        return (url: _https(s), seconds: sec);
+      }
+    }
+    return (url: '', seconds: 0);
   }
 
   /// 把微博各种尺寸的地址统一换成 `/large/`（原图）

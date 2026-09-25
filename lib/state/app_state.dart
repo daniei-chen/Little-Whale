@@ -333,9 +333,8 @@ class AppState extends ChangeNotifier {
     final platform = LocalRegistry.detect(url);
     if (platform == null) {
       throw lt.LocalParseError(
-        '本地模式还不支持这个平台。\n'
-        '目前已支持：${LocalRegistry.supportedNames.join(' / ')}\n'
-        '可以到「我的 → 解析偏好 → 解析方式」切到服务器模式。',
+        '暂不支持这个链接。\n'
+        '目前已支持：${LocalRegistry.supportedNames.join(' / ')}',
       );
     }
 

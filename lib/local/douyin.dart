@@ -199,7 +199,7 @@ class DouyinLocalPlatform extends LocalPlatform {
   }
 
   static const String _videoFailHint =      '没能从抖音手机分享页取到视频地址。可能是作品已删除、仅好友可见，或需要登录。\n'
-      '可以到「我的 → 解析偏好」临时切到服务器模式。';
+      '如果这条链接在抖音 App 里能正常打开，麻烦把链接发给我们排查。';
 
   /// `playwm`（带水印）→ `play`（无水印）。
   ///
@@ -280,7 +280,7 @@ class DouyinLocalPlatform extends LocalPlatform {
     throw const LocalParseError(
       '抖音这次没返回图片内容。\n\n'
       '通常是短时间内解析太频繁触发了风控 —— 等十几秒再试一次就好；'
-      '如果一直不行，也可以到「我的 → 解析偏好」临时切到服务器模式。',
+      '如果一直不行，换个链接试试，或过一会儿再来。',
     );
   }
 

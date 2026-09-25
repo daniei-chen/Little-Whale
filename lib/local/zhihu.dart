@@ -2,7 +2,7 @@
 import 'engine.dart';
 import 'types.dart';
 
-/// 知乎 · 本地解析（不需要服务器）
+/// 知乎 · 本地解析
 ///
 /// 【能做什么、不能做什么 —— 如实说明】
 /// 实测：
@@ -12,7 +12,7 @@ import 'types.dart';
 ///     302 到 `/signin?next=...`，拿不到内容。这是知乎的策略，不是我们没做。
 ///
 /// 所以这里对回答页给出**明确提示**（告诉用户去知乎 App 里复制专栏链接，
-/// 或到「我的 → 解析偏好」临时切服务器模式），而不是含糊地说「失败」。
+/// 而不是含糊地说「失败了」——用户不知道该干什么。
 class ZhihuLocalPlatform extends LocalPlatform {
   @override
   String get key => 'zhihu';
@@ -75,11 +75,11 @@ class ZhihuLocalPlatform extends LocalPlatform {
     if (r['needLogin'] == true) {
       throw LocalParseError(
         isAnswer
-            ? '知乎的**回答页**未登录打不开（知乎要求登录后才能看回答）。\n\n'
-                '可以试试：\n'
-                '· 换成**专栏文章**的链接（zhuanlan.zhihu.com/p/…），这个不需要登录\n'
-                '· 或到「我的 → 解析偏好」临时切到服务器模式'
-            : '知乎要求登录后才能看这个页面。可以试试专栏文章（zhuanlan.zhihu.com/p/…）。',
+            ? '知乎的**回答页**未登录打不开 —— 知乎要求登录才能看回答。\n\n'
+                '换个**专栏文章**的链接就行（zhuanlan.zhihu.com/p/…），那个不需要登录。\n'
+                '在知乎 App 里：进作者主页 → 文章 → 选一篇 → 分享 → 复制链接。'
+            : '知乎要求登录后才能看这个页面。\n\n'
+                '试试专栏文章（zhuanlan.zhihu.com/p/…），那个不需要登录。',
       );
     }
 
