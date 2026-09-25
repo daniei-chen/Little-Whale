@@ -65,11 +65,11 @@ void main() {
     // 拿平台自己的公开页面跑 —— 目的是验证「WebView 能开、脚本能跑」，
     // 而不是「一定能提出内容」。后者需要真实分享链接。
     // 前两个是**真实内容页**（从平台列表页挖出来的），后两个是首页对照。
+    // 都是**真实内容页**（从各平台列表页挖出来的）
     const urls = [
-      'https://haokan.baidu.com/v?vid=12386876873461850902',  // 好看视频·真实视频
+      'https://haokan.baidu.com/v?vid=12386876873461850902',  // 好看视频·真实视频 ✅ 已验证
+      'https://www.douban.com/group/topic/500634813/',        // 豆瓣·真实小组话题（Node 请求 403，看 WebView 能不能过）
       'https://www.huya.com/660115',                          // 虎牙·真实直播间
-      'https://www.douban.com/',                              // 首页对照
-      'https://www.ixigua.com/',                              // 首页对照
     ];
 
     var ok = 0;
