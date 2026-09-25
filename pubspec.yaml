@@ -1,0 +1,55 @@
+name: flashsave
+description: "小鲸鱼 —— 多平台视频/图文链接解析与保存工具，本地解析、保存无水印原片"
+publish_to: 'none'
+
+version: 0.0.1+1
+
+environment:
+  sdk: ^3.13.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 网络：需要下载进度回调，原生 HttpClient 用起来太啰嗦
+  dio: ^5.11.1
+
+  # 本地存储：历史记录与偏好设置
+  shared_preferences: ^2.4.0
+
+  # 保存到相册（Android 走 MediaStore，不需要宽泛的存储权限）
+  gal: ^2.3.1
+
+  # 临时目录（下载中转）
+  path_provider: ^2.1.5
+
+  # 按设计稿原样渲染 SVG 图标（设计稿给的就是 SVG 路径）
+  flutter_svg: ^2.0.17
+
+  # 本地解析引擎的核心：内置隐藏 WebView 跑平台自己的 JS，
+  # 我们只在旁边拦截它发出的接口响应 —— 和服务端 src/browser.js 同一套思路，
+  # 区别只是把浏览器从服务器搬到了手机里，从而彻底不需要服务器。
+  webview_flutter: ^4.14.1
+
+  # B站 wbi 签名要算 md5
+  crypto: ^3.0.6
+
+  # 打开「去下载」的链接（跳系统浏览器/下载器）
+  url_launcher: ^6.3.1
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  # 设备上跑的集成测试（验证 Android 特有的相册写入）
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  # 应用图标（品牌卡里也用它当 Logo）
+  assets:
+    - assets/icon.png

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文（HTTP）流量策略。
+
+  为什么要放行：
+    · 开发调试时后端是 http://10.0.2.2:8787（模拟器访问宿主机）或局域网 http://192.168.x.x
+    · 自建服务在上 HTTPS 之前也用 http
+  Android 9 起默认禁止明文请求，不放行的话这些场景会直接连不上。
+
+  注意：正式发布时你的服务应该是 HTTPS，那样这条策略根本用不到。
+  如果你确定只用 HTTPS，可以把下面改成 cleartextTrafficPermitted="false" 更安全。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>
