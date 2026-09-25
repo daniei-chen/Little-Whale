@@ -13,7 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flashsave/main.dart';
-import 'package:flashsave/local/types.dart';
 import 'package:flashsave/local/registry.dart';
 import 'package:flashsave/config.dart';
 import 'package:flashsave/data/platforms.dart';
