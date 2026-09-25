@@ -196,10 +196,12 @@ void main() {
     }, timeout: const Timeout(Duration(minutes: 2)));
 
     testWidgets('不支持的平台会被明确拒绝，而不是卡住', (tester) async {
-      // 今日头条/西瓜/优酷等已明确不做，识别不出来是**预期行为** ——
-      // 不能假装支持、等到解析时才失败。
-      expect(LocalRegistry.detect('https://www.toutiao.com/article/123/'), isNull,
-          reason: '头条不在范围内，应当识别不出来');
+      // 【注意别再拿头条举例了】v0.0.5 起头条/西瓜/优酷/爱奇艺等都纳入了
+      // （走通用适配器）。负面测试要用**真的不在范围**的链接。
+      expect(LocalRegistry.detect('https://www.youtube.com/watch?v=abc'), isNull,
+          reason: '国外平台不在范围内，应当识别不出来');
+      expect(LocalRegistry.detect('https://item.taobao.com/item.htm?id=1'), isNull,
+          reason: '电商链接不在范围内，应当识别不出来');
       expect(LocalRegistry.canParseLocally(''), isFalse);
       expect(LocalRegistry.supportedNames, contains('抖音'));
       expect(LocalRegistry.supportedNames, contains('小红书'));
@@ -207,8 +209,20 @@ void main() {
       expect(LocalRegistry.supportedNames, contains('微博'));
       expect(LocalRegistry.supportedNames, contains('快手'));
       expect(LocalRegistry.supportedNames, contains('知乎'));
-      expect(LocalRegistry.supportedNames.length, 6,
-          reason: '范围就是这 6 个平台，多一个少一个都要在这里体现');
+      // v0.0.5 起是 6 个核心 + 12 个通用 = 18 个。
+      // 【为什么不再写死总数】每加一个平台都要改断言，反而容易漏；
+      // 真正要守住的是「**核心平台正好 6 个**」—— 那 6 个是能去水印的，
+      // 少一个就是功能退化。
+      expect(LocalRegistry.coreNames.length, 6,
+          reason: '核心平台（能去水印的那些）必须正好是这 6 个');
+      expect(LocalRegistry.coreNames, contains('抖音'));
+      expect(LocalRegistry.coreNames, contains('小红书'));
+      expect(LocalRegistry.coreNames, contains('哔哩哔哩'));
+      expect(LocalRegistry.coreNames, contains('微博'));
+      expect(LocalRegistry.coreNames, contains('快手'));
+      expect(LocalRegistry.coreNames, contains('知乎'));
+      expect(LocalRegistry.all.length, greaterThanOrEqualTo(18),
+          reason: 'v0.0.5 起至少覆盖 18 个平台');
     });
 
     testWidgets('WebView 引擎已就绪', (tester) async {
