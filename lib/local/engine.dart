@@ -282,10 +282,9 @@ class LocalEngine {
     _hits.clear();
 
     await c.runJavaScript('window.__fsEpoch = $_epoch;').catchError((_) {});
-    await c.loadRequest(Uri.parse(pageUrl));
+    await _navigate(c, pageUrl, settle);
     unawaited(_installHookBurst());
 
-    await Future.delayed(settle);
     await _installHook();
 
     try {
@@ -339,6 +338,44 @@ class LocalEngine {
   /// `{}` 而不是 resolve 后的值。所以「等图片加载齐」这种等待必须由 Dart 驱动。
   ///
   /// [probeScript] 必须是一个**同步**表达式，返回 JSON 字符串。
+  /// 导航到 [pageUrl]，并**确认真的换了文档**才返回。
+  ///
+  /// 【为什么不能只 `loadRequest` + 固定等待】
+  /// `loadRequest` 返回时页面**还没加载完** —— 短链要过 302、目标页也要时间。
+  /// 如果这时就去读 DOM，读到的是**上一页的残留数据**。
+  ///
+  /// 实测踩过：性能基准里连着解析「抖音图文」和「抖音动图」两条链接，
+  /// 第二条只用了 914ms 就返回了 **46 张图** —— 那是第一条的数据。
+  /// 对用户来说就是「解析这个链接，出来的是上一个的内容」，非常严重。
+  ///
+  /// 判据：导航前在当前文档打一个标记，新文档里这个标记自然就没了。
+  /// 等它消失 = 文档确实被替换了。比猜等待时间可靠得多。
+  Future<void> _navigate(WebViewController c, String pageUrl, Duration settle) async {
+    try {
+      await c.runJavaScript('window.__fsPreNav = 1;');
+    } catch (_) {
+      // 当前页可能还没就绪，打不上标记也不影响后续（下面会兜底超时）
+    }
+
+    await c.loadRequest(Uri.parse(pageUrl));
+
+    // 等标记消失（最多 10 秒，超时也继续 —— 总比卡死好）
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final v = await c.runJavaScriptReturningResult('String(window.__fsPreNav)');
+        final s = v.toString().replaceAll('"', '');
+        if (s != '1') break; // 新文档了
+      } catch (_) {
+        break; // 取不到（文档正在切换）也说明已经在换
+      }
+      await Future.delayed(const Duration(milliseconds: 120));
+    }
+
+    // 再给页面一点渲染时间（DOM 就绪但数据还没填进去）
+    await Future.delayed(settle);
+  }
+
   Future<dynamic> evaluatePolling(
     String pageUrl,
     String probeScript, {
@@ -352,9 +389,8 @@ class LocalEngine {
     _hits.clear();
 
     await c.runJavaScript('window.__fsEpoch = $_epoch;').catchError((_) {});
-    await c.loadRequest(Uri.parse(pageUrl));
+    await _navigate(c, pageUrl, settle);
     unawaited(_installHookBurst());
-    await Future.delayed(settle);
 
     dynamic last;
     final deadline = DateTime.now().add(timeout);

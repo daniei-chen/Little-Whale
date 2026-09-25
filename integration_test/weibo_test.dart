@@ -56,7 +56,12 @@ void main() {
     // 原来那样写，翻不到就 if 跳过，测试照样绿。**等于图文路径根本没被测**。
     // 实测就撞到过：三次运行里有两次 (没找到)，却都是 All tests passed。
     // 所以这里给一条固定的带图微博做兜底，并且最后断言「两条路径都必须真的跑到」。
-    const fallbackPicId = '5339732289520397';
+    // 【这个 ID 会过期】微博内容会被删除，硬编码的兜底 ID 迟早失效 ——
+    // 实测就撞到过：原来填的 5339732289520397 后来返回「没返回这条内容」，
+    // 于是性能基准里微博一直失败。
+    // 正常路径是**从热榜翻一条当时的带图微博**（下面那段），
+    // 这个常量只在热榜恰好没有图时兜底；失效了就换一个（随便找条带图的微博）。
+    const fallbackPicId = '5345389245106119';
 
     var picId = '';
     var videoId = '';
@@ -110,8 +115,9 @@ void main() {
     print('[微博·图] 下载: HTTP ${resp.statusCode}  ${(resp.data ?? []).length} 字节');
     expect(resp.statusCode, anyOf(200, 206));
 
-    // 视频路径 —— 热榜偶尔没有视频微博，那就用固定 ID 兜底，同样不允许跳过
-    const fallbackVideoId = '5330126201949004';
+    // 视频路径 —— 热榜偶尔没有视频微博，那就用固定 ID 兜底，同样不允许跳过。
+    // 这个 ID 也会过期（微博内容会被删），失效了就换一条。
+    const fallbackVideoId = '5347109389995010';
     if (videoId.isEmpty) videoId = fallbackVideoId;
 
     final vr = await platform.parse('https://m.weibo.cn/detail/$videoId');
