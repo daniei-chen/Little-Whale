@@ -68,6 +68,17 @@ class GenericLocalPlatform extends LocalPlatform {
     // 用桌面 UA：这些平台的移动页往往更封闭，桌面页反而数据更全。
     await engine.setUserAgent(LocalEngine.desktopUa);
 
+    // 【为什么要「稳定即收工」】通用适配器面对的是各种不认识的页面 ——
+    // 有的内容很多、有的只有一张图、有的一张都没有（比如被反爬挡了）。
+    // 原来只判断「有视频 或 ≥2 张图」，那么内容少的页面就得**白等满 16 秒超时**，
+    // 用户看着进度条干等，体验很差。
+    //
+    // 现在加一条：数量连续几轮不变就认为加载完了，直接返回。
+    // 这样「页面确实没什么内容」也能在 3 秒左右给用户一个明确结果，
+    // 而不是让他等 16 秒。
+    var lastKey = '';
+    var stable = 0;
+
     final r = await engine.evaluatePolling(
       url,
       _script,
@@ -79,8 +90,21 @@ class GenericLocalPlatform extends LocalPlatform {
         final video = (v['videoUrl'] ?? '').toString();
         final imgs = v['images'];
         final n = imgs is List ? imgs.length : 0;
-        // 有视频就够；没有视频至少要有 2 张图（1 张多半是封面/logo）
-        return video.isNotEmpty || n >= 2;
+
+        // 有视频就够（视频是强信号，不用再等）
+        if (video.isNotEmpty) return true;
+        // 图够多也是强信号
+        if (n >= 2) return true;
+
+        // 弱信号：数量连续 4 轮没变（约 1.2 秒）就收工
+        final key = '$n';
+        if (key == lastKey) {
+          stable++;
+        } else {
+          stable = 0;
+        }
+        lastKey = key;
+        return stable >= 4;
       },
     );
 
