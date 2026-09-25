@@ -184,6 +184,21 @@ class BilibiliLocalPlatform extends LocalPlatform {
       }
 
       if (busy) {
+        // 接口被限流 —— 改从网页 SSR 拿（那条路不受接口风控影响）
+        final fromPage = await _articleFromPage(cvId);
+        if (fromPage.isNotEmpty) {
+          return LocalResult(
+            platform: key,
+            platformName: name,
+            type: 'images',
+            title: '',
+            author: '',
+            cover: fromPage.first.url,
+            referer: referer,
+            images: fromPage,
+            sourceUrl: url,
+          );
+        }
         throw const LocalParseError('B站暂时限制了访问频率，等十几秒再试一次。');
       }
       throw LocalParseError('B站没返回这篇专栏（$msg）。可能已被删除或仅粉丝可见。');
@@ -216,6 +231,22 @@ class BilibiliLocalPlatform extends LocalPlatform {
     }
 
     if (images.isEmpty) {
+      // 接口被限流时正文可能是空的 —— 改从网页 SSR 里捞
+      final fromPage = await _articleFromPage(cvId);
+      if (fromPage.isNotEmpty) {
+        return LocalResult(
+          platform: key,
+          platformName: name,
+          type: 'images',
+          title: (d['title'] ?? '').toString(),
+          author: (d['author_name'] ?? '').toString(),
+          cover: fromPage.first.url,
+          publishTime: _formatDate(d['publish_time'] ?? d['ctime']),
+          referer: referer,
+          images: fromPage,
+          sourceUrl: url,
+        );
+      }
       throw const LocalParseError('这篇专栏里没有可下载的图片。');
     }
 
@@ -327,6 +358,100 @@ class BilibiliLocalPlatform extends LocalPlatform {
       images: images,
       sourceUrl: url,
     );
+  }
+
+  /// 专栏的兜底路径：直接读网页的 SSR 数据。
+  ///
+  /// 【为什么要它】专栏接口 `x/article/view` 有频率风控（-509）。
+  /// App 里正常用不太会撞上，但**连着解析几篇就会被限流** ——
+  /// 那时接口给的是空正文，用户会看到「没有可下载的图片」，很困惑。
+  ///
+  /// 网页版把数据写进了 `window.__INITIAL_STATE__`，结构是
+  /// `detail.modules`（按序号排列的段落对象），图片散在里面。
+  /// 与其精确解析那个还在变的结构，不如**把整棵树走一遍，捞出所有
+  /// hdslb 图床的地址** —— 专栏正文里的图本来就只来自那里。
+  Future<List<LocalImage>> _articleFromPage(String cvId) async {
+    try {
+      final r = await _dio.get<String>(
+        'https://www.bilibili.com/read/cv$cvId/',
+        options: Options(responseType: ResponseType.plain),
+      );
+      final html = r.data ?? '';
+      final state = _extractBalanced(html, 'window.__INITIAL_STATE__');
+      if (state == null) return const [];
+
+      final json = jsonDecode(state.replaceAll('undefined', 'null'));
+
+      final out = <LocalImage>[];
+      final seen = <String>{};
+
+      void walk(dynamic node, int depth) {
+        if (node == null || depth > 12) return;
+        if (node is List) {
+          for (final e in node) {
+            walk(e, depth + 1);
+          }
+          return;
+        }
+        if (node is! Map) return;
+
+        // 找 `url` 字段里的图床地址
+        final u = _cleanImageUrl((node['url'] ?? '').toString());
+        if (u.isNotEmpty &&
+            (u.contains('hdslb.com') || u.contains('biliimg.com')) &&
+            (u.contains('/bfs/') || u.contains('/new_dyn/'))) {
+          if (seen.add(u)) {
+            out.add(LocalImage(
+              url: u,
+              width: (node['width'] as num?)?.toInt() ?? 0,
+              height: (node['height'] as num?)?.toInt() ?? 0,
+            ));
+          }
+        }
+        for (final v in node.values) {
+          walk(v, depth + 1);
+        }
+      }
+
+      walk(json, 0);
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 从一段 JS 里抠出 `marker=` 后面的平衡 JSON 对象
+  static String? _extractBalanced(String text, String marker) {
+    final at = text.indexOf(marker);
+    if (at < 0) return null;
+    final start = text.indexOf('{', at);
+    if (start < 0) return null;
+
+    var depth = 0;
+    var inStr = false;
+    var esc = false;
+    for (var i = start; i < text.length; i++) {
+      final ch = text[i];
+      if (inStr) {
+        if (esc) {
+          esc = false;
+        } else if (ch == r'\') {
+          esc = true;
+        } else if (ch == '"') {
+          inStr = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inStr = true;
+      } else if (ch == '{') {
+        depth++;
+      } else if (ch == '}') {
+        depth--;
+        if (depth == 0) return text.substring(start, i + 1);
+      }
+    }
+    return null;
   }
 
   /// B站图床地址清洗：补协议、去掉 `@` 之后的处理参数（那才是原图）。
