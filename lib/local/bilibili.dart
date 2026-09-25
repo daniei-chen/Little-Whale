@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 
@@ -164,8 +166,10 @@ class BilibiliLocalPlatform extends LocalPlatform {
   /// 那就是原图；带 `@` 的（如 `@1080w.webp`）是处理过的展示版。
   Future<LocalResult> _parseArticle(String cvId, String url) async {
     // 【为什么要重试】B站对专栏接口有频率风控，短时间内多打几次就返回
-    // `-509 请求过于频繁`。这不是「内容有问题」，等几秒就好 ——
+    // `-509 请求过于频繁`。这不是「内容有问题」，等一会儿就好 ——
     // 用户连续解析几篇时很容易撞上，直接报错体验很差。
+    //
+    // 退避 2/4/8 秒；实在拿不到再走**网页 SSR 兜底**（那条路不受接口风控影响）。
     Map<String, dynamic> body = const {};
     for (var attempt = 0; attempt < 4; attempt++) {
       final r = await _dio.get<Map<String, dynamic>>(
@@ -177,14 +181,19 @@ class BilibiliLocalPlatform extends LocalPlatform {
       if (code == 0) break;
 
       final msg = (body['message'] ?? '').toString();
-      final busy = msg.contains('频繁') || code == -509 || code == -412;
-      if (busy && attempt < 2) {
-        await Future.delayed(Duration(milliseconds: 1500 * (attempt + 1)));
+      final busy = msg.contains('频繁') || code == -509 || code == -412 || code == -352;
+      if (busy && attempt < 3) {
+        await Future.delayed(Duration(seconds: 2 << attempt));
         continue;
       }
 
       if (busy) {
-        // 接口被限流 —— 改从网页 SSR 拿（那条路不受接口风控影响）
+        // 接口被限流 —— 试着改从网页 SSR 拿。
+        //
+        // 【实测结论，别抱太大希望】验证过：**B站的限流是 IP 级的**，
+        // 被拦时网页接口同样返回一张约 1.3 KB 的拦截页（不是正常的 50 KB 页面），
+        // 所以这条路救不了重度限流。它只在「接口单独被限、网页还通」时有用。
+        // 真正的解法是等一会儿 —— 所以下面的报错文案强调「等半分钟」。
         final fromPage = await _articleFromPage(cvId);
         if (fromPage.isNotEmpty) {
           return LocalResult(
@@ -199,14 +208,18 @@ class BilibiliLocalPlatform extends LocalPlatform {
             sourceUrl: url,
           );
         }
-        throw const LocalParseError('B站暂时限制了访问频率，等十几秒再试一次。');
+        throw const LocalParseError(
+            'B站暂时限制了访问频率（短时间内解析太多条）。\n\n'
+            '等半分钟再试通常就好了。');
       }
       throw LocalParseError('B站没返回这篇专栏（$msg）。可能已被删除或仅粉丝可见。');
     }
 
     final code = (body['code'] as num?)?.toInt() ?? -1;
     if (code != 0) {
-      throw const LocalParseError('B站暂时限制了访问频率，等十几秒再试一次。');
+      throw const LocalParseError(
+          'B站暂时限制了访问频率（短时间内解析太多条）。\n\n'
+          '等半分钟再试通常就好了。');
     }
 
     final d = body['data'];
@@ -276,11 +289,17 @@ class BilibiliLocalPlatform extends LocalPlatform {
   /// 图片在 `data.item.modules.module_dynamic.major.draw.items[].src`，
   /// 新版也有 `major.opus.pics[].url` —— 两种都兼容。
   Future<LocalResult> _parseOpus(String dynId, String url) async {
-    // 【为什么要重试】实测里这条也撞过限流：稳定性连跑时第一轮还好好的，
-    // 第二轮就抛错。B站对动态详情接口同样有频率风控，退避一下就好，
-    // 没必要让用户看到失败。
+    // 【为什么要重试，而且要退避这么久】
+    //
+    // 实测踩到的：稳定性连跑时第一轮正常、第二轮就返回 `-352`。
+    // `-352` 是 B站新版的风控码 —— 它会校验浏览器指纹（dm_img_* 那一套），
+    // 我们的请求不带那些参数，短时间内打多了就会被拦。
+    //
+    // 关键是**它不是立刻恢复的**：原来 1.2/2.4/4.8 秒（合计约 10 秒）不够，
+    // 4 次全部撞在风控窗口里。现在拉到 2/4/8/16 秒（合计约 30 秒），
+    // 覆盖实测的风控窗口。对用户来说，「等一下能出结果」远好过「直接失败」。
     Map<String, dynamic> body = const {};
-    for (var attempt = 0; attempt < 4; attempt++) {
+    for (var attempt = 0; attempt < 5; attempt++) {
       final q = await _signedQuery({'id': dynId, 'timezone_offset': '-480'});
       final r = await _dio.get<Map<String, dynamic>>(
         'https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?$q',
@@ -291,16 +310,21 @@ class BilibiliLocalPlatform extends LocalPlatform {
 
       final msg = (body['message'] ?? '').toString();
       final busy = c == -509 || c == -412 || c == -352 || msg.contains('频繁');
-      if (busy && attempt < 3) {
-        await Future.delayed(Duration(milliseconds: 1200 * (1 << attempt)));
+      if (busy && attempt < 4) {
+        await Future.delayed(Duration(seconds: 2 << attempt));
         continue;
+      }
+      if (busy) {
+        throw const LocalParseError(
+            'B站暂时限制了访问频率（风控）。\n\n'
+            '等半分钟左右再试通常就好了 —— 短时间内连着解析多条 B站内容容易触发。');
       }
       throw LocalParseError('B站没返回这条动态（${msg.isEmpty ? c : msg}）。可能已被删除，或需要登录。');
     }
 
     final code = (body['code'] as num?)?.toInt() ?? -1;
     if (code != 0) {
-      throw const LocalParseError('B站暂时限制了访问频率，等十几秒再试一次。');
+      throw const LocalParseError('B站暂时限制了访问频率，等半分钟再试一次。');
     }
 
     final data = body['data'];
@@ -394,7 +418,11 @@ class BilibiliLocalPlatform extends LocalPlatform {
       );
       final html = r.data ?? '';
       final state = _extractBalanced(html, 'window.__INITIAL_STATE__');
-      if (state == null) return const [];
+      if (state == null) {
+        debugPrint('[B站兜底] 页面 ${html.length} 字，但没找到 __INITIAL_STATE__');
+        return const [];
+      }
+      debugPrint('[B站兜底] state 长度 ${state.length}');
 
       final json = jsonDecode(state.replaceAll('undefined', 'null'));
 
@@ -430,8 +458,10 @@ class BilibiliLocalPlatform extends LocalPlatform {
       }
 
       walk(json, 0);
+      debugPrint('[B站兜底] 走到 ${out.length} 张图');
       return out;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[B站兜底] 失败: $e');
       return const [];
     }
   }
