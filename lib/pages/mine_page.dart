@@ -110,7 +110,7 @@ class _MinePageState extends State<MinePage> {
                   _Group(children: [
                     _cell(
                       context,
-                      icon: AppIcons.info(AppColors.blue, 14),
+                      icon: AppIcons.alert(AppColors.amber, 14),
                       label: '错误日志',
                       value: '排查问题用',
                       onTap: () => Navigator.of(context).push(
@@ -126,7 +126,7 @@ class _MinePageState extends State<MinePage> {
                     ),
                     _cell(
                       context,
-                      icon: AppIcons.info(AppColors.blue, 14),
+                      icon: AppIcons.refresh(AppColors.blue, 14),
                       label: '检查更新',
                       value: _checkingUpdate ? '检查中…' : 'v$kAppVersion',
                       onTap: _checkingUpdate
@@ -197,7 +197,7 @@ class _MinePageState extends State<MinePage> {
                           style: TextStyle(
                               fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text, height: 1.2)),
                       const SizedBox(height: 5),
-                      Text('记录只存在本机，不上传服务器',
+                      Text('解析记录只存在这台手机里',
                           style: AppText.brandDesc.copyWith(fontSize: 11, color: const Color(0xFF858C96))),
                     ],
                   ),

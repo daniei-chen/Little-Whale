@@ -440,11 +440,26 @@ class _HomePageState extends State<HomePage> {
   /* ------------------------------------------------------------------ */
 
   Widget _buildGuide() {
-    const steps = [
-      ['01', '复制链接', '在 App 里点分享，复制作品链接'],
-      ['02', '粘贴解析', '回到这里，粘贴后点开始解析'],
-      ['03', '保存相册', '选原片版本，一键存进相册'],
+    // 【一步一图标】原来只有「01/02/03」三个数字，看着像表单编号、没有信息量。
+    // 换成「图标徽章 + 序号」：图标一眼说明这一步干什么，
+    // 序号留在右上角保持步骤感。
+    const steps = <List<String>>[
+      ['01', '复制链接', '在 App 里点分享，复制作品链接', 'link'],
+      ['02', '粘贴解析', '回到这里，粘贴后点开始解析', 'parse'],
+      ['03', '保存相册', '选原片版本，一键存进相册', 'check'],
     ];
+
+    Widget _badge(String kind) {
+      switch (kind) {
+        case 'link':
+          return AppIcons.link(AppColors.blue, 13);
+        case 'parse':
+          return AppIcons.parse(AppColors.blue, 13);
+        default:
+          return AppIcons.check(AppColors.blue, 13);
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -465,19 +480,34 @@ class _HomePageState extends State<HomePage> {
                       padding: EdgeInsets.only(right: st[0] == '03' ? 0 : 7),
                       child: SoftCard(
                         radius: 13,
-                        padding: const EdgeInsets.fromLTRB(9, 11, 9, 11),
+                        padding: const EdgeInsets.fromLTRB(10, 11, 10, 11),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(st[0],
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF8FA0F4),
-                                  letterSpacing: 0.4,
-                                  height: 1.1,
-                                )),
-                            const SizedBox(height: 7),
+                            Row(
+                              children: [
+                                // 图标徽章
+                                Container(
+                                  width: 24,
+                                  height: 24,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.blueSoft,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Center(child: _badge(st[3])),
+                                ),
+                                const Spacer(),
+                                Text(st[0],
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFFB9C2D6),
+                                      letterSpacing: 0.4,
+                                      height: 1.1,
+                                    )),
+                              ],
+                            ),
+                            const SizedBox(height: 9),
                             Text(st[1],
                                 style: const TextStyle(
                                     fontSize: 12,

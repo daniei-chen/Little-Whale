@@ -38,7 +38,15 @@ class AppIcons {
   static const _docBody =
       "<path d='M4 19.5V6a2 2 0 0 1 2-2h9l5 5v10.5a.5.5 0 0 1-.5.5H4.5a.5.5 0 0 1-.5-.5Z'/><path d='M14 4v6h6M8 14h8M8 17h5'/>";
   static const _infoBody = "<circle cx='12' cy='12' r='9'/><path d='M12 10v6M12 7h.01'/>";
-
+  static const _refreshBody = '''
+<path d="M13.5 2.5a5.5 5.5 0 1 0 5.5 5.5" />
+<path d="M19 2.5v3h-3" />
+''';
+  static const _alertBody = '''
+<circle cx="11" cy="11" r="8" />
+<path d="M11 7.5v4.5" />
+<path d="M11 15h.01" />
+''';
   // ---- 功能性 ----
   static const _arrowRightBody = "<path d='M5 12h14M13 6l6 6-6 6'/>";
   static const _chevronRightBody = "<path d='m9 6 6 6-6 6'/>";
@@ -68,6 +76,13 @@ class AppIcons {
       _icon(_docBody, c, size, stroke);
   static Widget info(Color c, double size, {double stroke = 1.8}) =>
       _icon(_infoBody, c, size, stroke);
+  /// 刷新（检查更新用）
+  static Widget refresh(Color c, double size, {double stroke = 1.8}) =>
+      _icon(_refreshBody, c, size, stroke);
+
+  /// 感叹号（错误日志用）—— 和 info 区分开
+  static Widget alert(Color c, double size, {double stroke = 1.8}) =>
+      _icon(_alertBody, c, size, stroke);
   static Widget arrowRight(Color c, double size, {double stroke = 2.0}) =>
       _icon(_arrowRightBody, c, size, stroke);
   static Widget chevronRight(Color c, double size, {double stroke = 2.0}) =>
