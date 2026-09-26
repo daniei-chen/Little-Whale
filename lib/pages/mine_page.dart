@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
+import '../local/registry.dart';
 import '../services/crash_log.dart';
 import '../services/update_service.dart';
 import '../state/app_state.dart';
@@ -75,6 +76,15 @@ class _MinePageState extends State<MinePage> {
                       icon: AppIcons.help(AppColors.blue, 14),
                       label: '使用教程',
                       onTap: () => _showTutorial(context),
+                    ),
+                    _cell(
+                      context,
+                      icon: AppIcons.doc(AppColors.blue, 14),
+                      label: '支持平台',
+                      // 首页只放 6 个核心平台（18 个全铺出来太挤），
+                      // 完整列表放这里，想看的人自己点
+                      value: '${LocalRegistry.all.length} 个',
+                      onTap: () => _showPlatforms(context),
                     ),
                   ]),
                   _groupLabel('解析偏好'),
@@ -495,6 +505,79 @@ class _MinePageState extends State<MinePage> {
     ));
   }
 
+  /// 「支持平台」对话框 —— 完整的 18 个平台列表。
+  ///
+  /// 【为什么要有这一页】首页只显示 6 个核心平台（18 个全铺出来品牌卡太挤），
+  /// 但用户需要能查到完整列表 —— 尤其想知道「我常用的那个平台支不支持」。
+  /// 这里按「能力」分组展示，顺便说明通用适配器的边界。
+  Future<void> _showPlatforms(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('支持平台',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('核心平台 · 无水印原片 + 动图',
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text)),
+                const SizedBox(height: 4),
+                Text(
+                  LocalRegistry.coreNames.join(' · '),
+                  style: const TextStyle(
+                      fontSize: 12.5, color: AppColors.text2, height: 1.7),
+                ),
+                const SizedBox(height: 14),
+                const Text('其他主流平台 · 通用解析',
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text)),
+                const SizedBox(height: 4),
+                Text(
+                  LocalRegistry.genericNames.join(' · '),
+                  style: const TextStyle(
+                      fontSize: 12.5, color: AppColors.text2, height: 1.7),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceSoft,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.line),
+                  ),
+                  child: const Text(
+                    '通用解析靠网页渲染提取，**拿不到无水印原图**，也识别不了动图。\n'
+                    '优酷 / 爱奇艺 / 腾讯视频 / 芒果TV 的正片有 DRM 加密，取不到直链。',
+                    style: TextStyle(
+                        fontSize: 11.5, color: AppColors.muted, height: 1.6),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text('没找到你要的平台？把链接发给作者，我们会评估加入。',
+                    style: TextStyle(fontSize: 12, color: AppColors.blue)),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('知道了', style: TextStyle(color: AppColors.blue))),
+        ],
+      ),
+    );
+  }
   /// 「关于」对话框。
   ///
   /// 【改了什么】原来这里会去探测解析服务、显示「服务已连接 / 未连接」和服务地址 ——

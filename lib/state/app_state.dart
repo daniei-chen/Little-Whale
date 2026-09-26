@@ -240,10 +240,13 @@ class AppState extends ChangeNotifier {
       return;
     }
     if (detectPlatform(text) == null) {
-      // 从 kPlatforms 动态生成，不写死 ——
-      // 写死的话以后加平台又忘了改这里，用户会看到一份过期的「支持列表」。
-      final names = kPlatforms.map((p) => p.name).join(' / ');
-      error = '暂不支持这个平台。目前支持：$names';
+      // 【文案是用户定的】不要说含糊的「解析失败」——
+      // 直接点明「这不是主流平台」，并给出下一步该干什么（找作者）。
+      // 支持列表从 kPlatforms 动态生成，不写死，免得加平台又忘了改这里。
+      error = '这看起来不是主流平台的链接。\n\n'
+          '可能是小众站点，或者我们还没覆盖到 —— 把链接发给作者，我们会评估加入。\n\n'
+          '目前已支持 ${kPlatforms.length} 个平台：'
+          '${kPlatforms.take(6).map((p) => p.name).join(' / ')} 等';
       notifyListeners();
       return;
     }
@@ -333,8 +336,10 @@ class AppState extends ChangeNotifier {
     final platform = LocalRegistry.detect(url);
     if (platform == null) {
       throw lt.LocalParseError(
-        '暂不支持这个链接。\n'
-        '目前已支持：${LocalRegistry.supportedNames.join(' / ')}',
+        '这看起来不是主流平台的链接。\n\n'
+        '可能是小众站点，或者我们还没覆盖到 —— 把链接发给作者，我们会评估加入。\n\n'
+        '目前已支持 ${LocalRegistry.all.length} 个平台：'
+        '${LocalRegistry.coreNames.join(' / ')} 等',
       );
     }
 

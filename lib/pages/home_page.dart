@@ -223,10 +223,15 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             const SizedBox(height: 16),
+            // 【为什么只显示 6 个】原来把 18 个平台全铺出来，
+            // 品牌卡里挤了三四行小圆点，看着很碎、也不好看。
+            // 主页只需要传达「主流平台都支持」——
+            // 完整的列表放到「我的 → 支持平台」里，想看的人去看。
             Wrap(
               spacing: 7,
               runSpacing: 7,
               children: kPlatforms
+                  .take(6)
                   .map((p) => Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 9, vertical: 5.5),
@@ -251,6 +256,13 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ))
                   .toList(),
+            ),
+            const SizedBox(height: 10),
+            // 完整列表放到「我的」页，这里只给一句提示 —— 别让品牌卡太挤
+            Text(
+              '另有 ${kPlatforms.length - 6} 个平台支持，见「我的 → 支持平台」',
+              style: AppText.pill.copyWith(
+                  fontSize: 10.5, color: const Color(0xFFA8AEB8)),
             ),
           ],
         ),

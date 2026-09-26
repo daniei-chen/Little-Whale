@@ -457,11 +457,15 @@ void main() {
     expect(find.text('一键粘贴'), findsOneWidget);
     expect(find.text('三步搞定'), findsOneWidget);
     expect(find.text('使用须知'), findsOneWidget);
-    for (final p in kPlatforms) {
+    // 【为什么只断言前 6 个】首页现在只显示核心平台 ——
+    // 18 个全铺出来品牌卡会挤三四行小圆点，很碎、也不好看。
+    // 完整列表移到「我的 → 支持平台」。
+    for (final p in kPlatforms.take(6)) {
       expect(find.text(p.name), findsWidgets);
     }
-    // 六个平台都要出现在首页标签里 —— 这条是防「解析支持了但界面没更新」
-    expect(kPlatforms.length, greaterThanOrEqualTo(6));
+    // 第 7 个（西瓜视频）不该再出现在首页
+    expect(find.text(kPlatforms[6].name), findsNothing,
+        reason: '首页只放核心平台，避免界面太挤');
     expect(find.text('快手'), findsWidgets);
     expect(find.text('微博'), findsWidgets);
     expect(find.text('知乎'), findsWidgets);
