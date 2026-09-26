@@ -65,12 +65,14 @@ void main() {
     // 拿平台自己的公开页面跑 —— 目的是验证「WebView 能开、脚本能跑」，
     // 而不是「一定能提出内容」。后者需要真实分享链接。
     // 前两个是**真实内容页**（从平台列表页挖出来的），后两个是首页对照。
-    // 都是**真实内容页**（从列表页/搜索接口挖出来的）
+    // 都是**真实内容页**（从平台列表页 / 搜索接口挖出来的）
     const urls = [
-      'https://haokan.baidu.com/v?vid=12386876873461850902',  // 好看视频·真实视频
-      'https://www.iqiyi.com/v_3031886092227301.html',        // 爱奇艺·真实视频（搜索接口挖到）
-      'https://tieba.baidu.com/p/3138733512',                 // 百度贴吧·真实帖子（Node 403，看 WebView 能否过）
-      'https://www.huya.com/660115',                          // 虎牙·真实直播间
+      'https://haokan.baidu.com/v?vid=12386876873461850902',  // 好看视频
+      'https://www.toutiao.com/article/7689401276165079615/', // 今日头条（搜索接口挖到 group_id）
+      'https://v.youku.com/v_show/id_844071.html',            // 优酷（搜索接口挖到 programId）
+      'https://www.iqiyi.com/v_3031886092227301.html',        // 爱奇艺
+      'https://tieba.baidu.com/p/3138733512',                 // 百度贴吧（Node 403，WebView 能过）
+      'https://www.huya.com/660115',                          // 虎牙
     ];
 
     var ok = 0;
