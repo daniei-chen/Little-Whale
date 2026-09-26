@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config.dart';
 import '../local/registry.dart';
 import '../services/crash_log.dart';
+import '../services/installer.dart';
 import '../services/update_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -480,19 +481,150 @@ class _MinePageState extends State<MinePage> {
       ),
     );
 
-    // 点了「立即更新」→ 打开下载页
+    // 点了「立即更新」→ **在 App 内下载**，下完拉起系统安装器
     if (dismissed == false) {
-      final uri = Uri.tryParse(info.url);
-      if (uri == null) {
-        _toast('下载地址无效');
-        return;
-      }
-      try {
-        final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-        if (!ok) _toast('打不开下载页，请手动访问：${info.url}');
-      } catch (_) {
-        _toast('打不开下载页，请手动访问：${info.url}');
-      }
+      await _downloadAndInstall(context, info);
+    }
+  }
+
+  /// 应用内下载新版本并安装。
+  ///
+  /// 【为什么下载放在 App 里】跳浏览器会让用户离开 App、还要自己找文件，
+  /// 体验很割裂。这里在 App 内下载（带进度、可断点续传），下完直接拉起
+  /// 系统安装器。
+  ///
+  /// 【安装那一步必须弹系统框】Android 不允许静默安装，这是系统安全设计，
+  /// 绕不过去也不该绕。所以用户还是会看到一次确认框。
+  Future<void> _downloadAndInstall(BuildContext context, UpdateInfo info) async {
+    // 先看有没有「安装未知应用」的权限；没有就先去设置里开
+    final can = await Installer.canInstall();
+    if (!can) {
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('需要开启一个开关',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          content: const Text(
+            '安装新版本需要允许「安装未知应用」。\n\n'
+            '点「去开启」会跳到系统设置，找到「小鲸鱼」打开那个开关，然后回来再点一次更新。\n\n'
+            '（这是安卓的安全限制，任何 App 自己更新都要走这一步。）',
+            style: TextStyle(fontSize: 13, height: 1.7, color: AppColors.text2),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('以后再说', style: TextStyle(color: AppColors.text2))),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await Installer.requestInstallPermission();
+              },
+              child: const Text('去开启', style: TextStyle(color: AppColors.blue)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // 下载进度对话框
+    final progress = ValueNotifier<double>(0);
+    final label = ValueNotifier<String>('准备下载…');
+    var cancelled = false;
+
+    if (!context.mounted) return;
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('正在下载新版本',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        content: ValueListenableBuilder<double>(
+          valueListenable: progress,
+          builder: (_, p, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: LinearProgressIndicator(
+                  value: p > 0 ? p : null,
+                  minHeight: 6,
+                  backgroundColor: AppColors.blueSoft,
+                  valueColor: const AlwaysStoppedAnimation(AppColors.blue),
+                ),
+              ),
+              const SizedBox(height: 10),
+              ValueListenableBuilder<String>(
+                valueListenable: label,
+                builder: (_, t, _) => Text(t,
+                    style: const TextStyle(fontSize: 12, color: AppColors.text2)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              cancelled = true;
+              Navigator.pop(ctx);
+            },
+            child: const Text('取消', style: TextStyle(color: AppColors.text2)),
+          ),
+        ],
+      ),
+    ));
+
+    String? path;
+    try {
+      path = await UpdateService.instance.downloadApk(
+        info,
+        onProgress: (p, got, total) {
+          progress.value = p;
+          final mb = (got / 1024 / 1024).toStringAsFixed(1);
+          label.value = total > 0
+              ? '$mb MB / ${(total / 1024 / 1024).toStringAsFixed(1)} MB'
+              : '$mb MB';
+        },
+      );
+    } catch (e) {
+      if (!mounted || cancelled) return;
+      // 应用内下载失败时给一条退路 —— 别让用户卡在「更新不了」。
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('下载失败：$e'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: '用浏览器打开',
+          onPressed: () async {
+            final uri = Uri.tryParse(info.url);
+            if (uri == null) return;
+            try {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            } catch (_) {
+              _toast('打不开，请手动访问：${info.url}');
+            }
+          },
+        ),
+      ));
+      return;
+    }
+
+    if (!mounted) return;
+    // 关掉进度框（如果用户已经点了取消，这里就不会再有关闭动作）
+    if (!cancelled) Navigator.of(context, rootNavigator: true).pop();
+
+    if (cancelled) return;
+
+    try {
+      await Installer.install(path);
+    } catch (e) {
+      _toast('安装包已下载，但打不开安装器：$e');
     }
   }
 
