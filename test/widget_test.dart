@@ -451,7 +451,7 @@ void main() {
   testWidgets('首页：品牌卡 / 输入区 / 主按钮 都在', (tester) async {
     await pumpApp(tester);
 
-    expect(find.text('小陈和朋友们的存图小鲸鱼'), findsWidgets);
+    expect(find.text('小鲸鱼'), findsWidgets);
     expect(find.text('分享链接'), findsOneWidget);
     expect(find.text('开始解析'), findsOneWidget);
     expect(find.text('一键粘贴'), findsOneWidget);

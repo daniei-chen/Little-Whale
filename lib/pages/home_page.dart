@@ -207,8 +207,7 @@ class _HomePageState extends State<HomePage> {
                       Row(
                         children: [
                           const Expanded(
-                              child: Text('小陈和朋友们的存图小鲸鱼',
-                                  style: AppText.brandTitle)),
+                              child: Text('小鲸鱼', style: AppText.brandTitle)),
                           // 标识放在标题这一行、右对齐
                           const _LocalBadge(),
                         ],
