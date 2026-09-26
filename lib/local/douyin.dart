@@ -438,7 +438,34 @@ class DouyinLocalPlatform extends LocalPlatform {
     }
   }
 
-  var cover = v ? String(v.poster || '') : '';
+  // ---- 封面 ----
+  //
+  // 【为什么不能只取 video.poster】实测抖音的手机分享页上，`<video>` 的
+  // `poster` 属性经常是空的 —— 用户看到的就是一张空白卡片（只有播放按钮）。
+  // 所以按可靠度依次兜底：
+  //   1. og:image（平台给分享卡片准备的图，最稳）
+  //   2. video 的 poster
+  //   3. 页面上第一张够大的图（通常是视频封面）
+  var cover = '';
+  var og = document.querySelector('meta[property="og:image"], meta[name="og:image"]');
+  if (og) cover = String(og.getAttribute('content') || '').trim();
+  if (!cover && v) cover = String(v.poster || '').trim();
+  if (!cover) {
+    var all = document.querySelectorAll('img');
+    for (var q = 0; q < all.length; q++) {
+      var el = all[q];
+      var s = el.currentSrc || el.src || '';
+      if (!s || s.indexOf('http') !== 0) continue;
+      // 太小的多半是头像/图标
+      if (el.naturalWidth && el.naturalWidth < 300) continue;
+      if (/avatar|icon|logo|emoji/i.test(s)) continue;
+      cover = s;
+      break;
+    }
+  }
+  // 网站常常给 http 的封面地址，必须升到 https —— 否则 Android 会拦明文请求
+  if (cover.indexOf('http://') === 0) cover = 'https://' + cover.substring(7);
+
   var dur = (v && isFinite(v.duration) && v.duration > 0) ? Math.round(v.duration) : 0;
 
   // 清晰度：地址里通常带 ratio=720p

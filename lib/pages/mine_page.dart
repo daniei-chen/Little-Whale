@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
@@ -36,7 +39,7 @@ class _MinePageState extends State<MinePage> {
     // 延迟几秒再查，别和首屏渲染抢时间。
     // 只有真发现新版本才弹窗（同一个版本一天最多提醒一次）。
     _updateTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) _checkUpdate(context);
+      if (mounted) _checkUpdate();
     });
   }
 
@@ -132,7 +135,7 @@ class _MinePageState extends State<MinePage> {
                       value: _checkingUpdate ? '检查中…' : 'v$kAppVersion',
                       onTap: _checkingUpdate
                           ? null
-                          : () => _checkUpdate(context, manual: true),
+                          : () => _checkUpdate(manual: true),
                     ),
                     _cell(
                       context,
@@ -161,6 +164,107 @@ class _MinePageState extends State<MinePage> {
 
   /* ---------------- 个人卡 ---------------- */
 
+  /// 编辑昵称 / 头像。
+  ///
+  /// 放在一个对话框里：改名字 + 换头像，改完立即生效。
+  /// 头像存的是**本地文件路径**（不是把图片拷进 App）—— 简单、不占空间，
+  /// 用户删了原图就自动退回默认的小鲸鱼图标。
+  Future<void> _editProfile(AppState s) async {
+    final controller = TextEditingController(text: s.settings.userName);
+    var avatarPath = s.settings.avatarPath;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setInner) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Text('编辑资料',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 头像预览 + 换图
+              GestureDetector(
+                onTap: () async {
+                  try {
+                    final picked = await ImagePicker().pickImage(
+                      source: ImageSource.gallery,
+                      maxWidth: 512,
+                      maxHeight: 512,
+                      imageQuality: 88,
+                    );
+                    if (picked == null) return;
+                    setInner(() => avatarPath = picked.path);
+                  } catch (e) {
+                    if (mounted) _toast('选图失败：$e');
+                  }
+                },
+                child: Column(
+                  children: [
+                    Container(
+                      width: 72,
+                      height: 72,
+                      clipBehavior: Clip.antiAlias,
+                      padding: EdgeInsets.all(avatarPath.isEmpty ? 5 : 0),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: const Color(0xFFE4EAF6)),
+                      ),
+                      child: avatarPath.isEmpty
+                          ? Image.asset('assets/icon.png', fit: BoxFit.contain)
+                          : Image.file(File(avatarPath),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) =>
+                                  Image.asset('assets/icon.png', fit: BoxFit.contain)),
+                    ),
+                    const SizedBox(height: 7),
+                    const Text('点头像从相册换一张',
+                        style: TextStyle(fontSize: 11.5, color: AppColors.blue)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                maxLength: 16,
+                decoration: const InputDecoration(
+                  labelText: '昵称',
+                  counterText: '',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            if (avatarPath.isNotEmpty)
+              TextButton(
+                onPressed: () => setInner(() => avatarPath = ''),
+                child: const Text('恢复默认头像',
+                    style: TextStyle(color: AppColors.text2)),
+              ),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('取消', style: TextStyle(color: AppColors.text2))),
+            TextButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                s.updateSettings(s.settings.copyWith(
+                  userName: name.isEmpty ? '小鲸鱼用户' : name,
+                  avatarPath: avatarPath,
+                ));
+                Navigator.pop(ctx);
+              },
+              child: const Text('保存', style: TextStyle(color: AppColors.blue)),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+  }
   Widget _buildProfile(AppState s) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -178,29 +282,59 @@ class _MinePageState extends State<MinePage> {
           children: [
             Row(
               children: [
-                Container(
-                  width: 50,
-                  height: 50,
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(15),
-                    border: Border.all(color: const Color(0xFFE4EAF6)),
+                // 头像：用户换过就显示自己的图，没换就是默认的小鲸鱼
+                Pressable(
+                  onTap: () => _editProfile(s),
+                  child: Container(
+                    width: 50,
+                    height: 50,
+                    clipBehavior: Clip.antiAlias,
+                    padding: EdgeInsets.all(s.settings.avatarPath.isEmpty ? 4 : 0),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: const Color(0xFFE4EAF6)),
+                    ),
+                    child: s.settings.avatarPath.isEmpty
+                        ? Image.asset('assets/icon.png', fit: BoxFit.contain)
+                        : Image.file(File(s.settings.avatarPath),
+                            fit: BoxFit.cover,
+                            // 图被删了就退回默认图标，别显示裂图
+                            errorBuilder: (_, _, _) =>
+                                Image.asset('assets/icon.png', fit: BoxFit.contain)),
                   ),
-                  child: Image.asset('assets/icon.png', fit: BoxFit.contain),
                 ),
                 const SizedBox(width: 11),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('小鲸鱼用户',
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text, height: 1.2)),
-                      const SizedBox(height: 5),
-                      Text('解析记录只存在这台手机里',
-                          style: AppText.brandDesc.copyWith(fontSize: 11, color: const Color(0xFF858C96))),
-                    ],
+                  child: Pressable(
+                    onTap: () => _editProfile(s),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(s.settings.userName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.text,
+                                      height: 1.2)),
+                            ),
+                            const SizedBox(width: 5),
+                            // 一点提示：这里可以点
+                            Icon(Icons.edit_outlined,
+                                size: 13, color: AppColors.muted),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        Text('解析记录只存在这台手机里',
+                            style: AppText.brandDesc.copyWith(
+                                fontSize: 11, color: const Color(0xFF858C96))),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -406,7 +540,7 @@ class _MinePageState extends State<MinePage> {
   /// [manual] = true 是用户主动点的：不管有没有更新都要给个反馈，
   /// 否则点了一下没动静，用户会以为坏了。
   /// [manual] = false 是启动时的静默检查：只在真有新版时才弹窗。
-  Future<void> _checkUpdate(BuildContext context, {bool manual = false}) async {
+  Future<void> _checkUpdate({bool manual = false}) async {
     if (_checkingUpdate) return;
     setState(() => _checkingUpdate = true);
 
@@ -427,7 +561,7 @@ class _MinePageState extends State<MinePage> {
     }
 
     await UpdateService.instance.markNotified(info.build);
-    if (!context.mounted) return;
+    if (!mounted) return;
 
     // 强制更新不给「以后再说」
     final dismissed = await showDialog<bool>(
@@ -482,8 +616,8 @@ class _MinePageState extends State<MinePage> {
     );
 
     // 点了「立即更新」→ **在 App 内下载**，下完拉起系统安装器
-    if (dismissed == false) {
-      await _downloadAndInstall(context, info);
+    if (dismissed == false && mounted) {
+      await _downloadAndInstall(info);
     }
   }
 
@@ -495,11 +629,17 @@ class _MinePageState extends State<MinePage> {
   ///
   /// 【安装那一步必须弹系统框】Android 不允许静默安装，这是系统安全设计，
   /// 绕不过去也不该绕。所以用户还是会看到一次确认框。
-  Future<void> _downloadAndInstall(BuildContext context, UpdateInfo info) async {
+  Future<void> _downloadAndInstall(UpdateInfo info) async {
+    // 【在第一个 await 之前就把这两个取好】await 之后再用 `of(context)`
+    // 会撞上 use_build_context_synchronously —— 那时候页面可能已经销毁了。
+    // 提前拿到引用，后面无论等多久都能安全使用。
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+
     // 先看有没有「安装未知应用」的权限；没有就先去设置里开
     final can = await Installer.canInstall();
     if (!can) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -535,7 +675,7 @@ class _MinePageState extends State<MinePage> {
     final label = ValueNotifier<String>('准备下载…');
     var cancelled = false;
 
-    if (!context.mounted) return;
+    if (!mounted) return;
     unawaited(showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -595,7 +735,7 @@ class _MinePageState extends State<MinePage> {
     } catch (e) {
       if (!mounted || cancelled) return;
       // 应用内下载失败时给一条退路 —— 别让用户卡在「更新不了」。
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      messenger.showSnackBar(SnackBar(
         content: Text('下载失败：$e'),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 8),
@@ -617,7 +757,7 @@ class _MinePageState extends State<MinePage> {
 
     if (!mounted) return;
     // 关掉进度框（如果用户已经点了取消，这里就不会再有关闭动作）
-    if (!cancelled) Navigator.of(context, rootNavigator: true).pop();
+    if (!cancelled) navigator.pop();
 
     if (cancelled) return;
 

@@ -448,27 +448,20 @@ void main() {
    * 二、三个页面的渲染
    * ================================================================ */
 
-  testWidgets('首页：品牌卡 / 输入区 / 主按钮 / 三步 / 须知 都在', (tester) async {
+  testWidgets('首页：品牌卡 / 输入区 / 主按钮 都在', (tester) async {
     await pumpApp(tester);
 
-    expect(find.text('小鲸鱼'), findsWidgets);
+    expect(find.text('小陈和朋友们的存图小鲸鱼'), findsWidgets);
     expect(find.text('分享链接'), findsOneWidget);
     expect(find.text('开始解析'), findsOneWidget);
     expect(find.text('一键粘贴'), findsOneWidget);
-    expect(find.text('三步搞定'), findsOneWidget);
-    expect(find.text('使用须知'), findsOneWidget);
-    // 【为什么只断言前 6 个】首页现在只显示核心平台 ——
-    // 18 个全铺出来品牌卡会挤三四行小圆点，很碎、也不好看。
-    // 完整列表移到「我的 → 支持平台」。
-    for (final p in kPlatforms.take(6)) {
-      expect(find.text(p.name), findsWidgets);
-    }
-    // 第 7 个（西瓜视频）不该再出现在首页
-    expect(find.text(kPlatforms[6].name), findsNothing,
-        reason: '首页只放核心平台，避免界面太挤');
-    expect(find.text('快手'), findsWidgets);
-    expect(find.text('微博'), findsWidgets);
-    expect(find.text('知乎'), findsWidgets);
+    // 【已移除】用户要求去掉「三步搞定」和「使用须知」——首页信息太满。
+    expect(find.text('三步搞定'), findsNothing);
+    expect(find.text('使用须知'), findsNothing);
+    // 【平台标签已从首页移除】用户要求去掉 —— 品牌卡太满。
+    // 现在只留一句说明，完整的 18 个平台列表在「我的 → 支持平台」里。
+    expect(find.textContaining('18 个平台'), findsOneWidget);
+    expect(find.text('抖音'), findsNothing, reason: '首页不再列平台标签');
   });
 
   testWidgets('首页：注入解析结果后能画出结果卡', (tester) async {

@@ -37,6 +37,9 @@ dependencies:
   # 打开「去下载」的链接（跳系统浏览器/下载器）
   url_launcher: ^6.3.1
 
+  # 「我的」页换头像时从相册选图
+  image_picker: ^1.1.2
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

@@ -20,29 +20,47 @@ class AppSettings {
   /// 想要静态图的可以在设置里关掉。
   final bool saveLiveAsVideo;
 
+  /// 用户自己起的昵称（「我的」页显示，可改）
+  final String userName;
+
+  /// 自定义头像的本地文件路径。空 = 用默认的小鲸鱼图标。
+  final String avatarPath;
+
   const AppSettings({
     this.autoPaste = true,
     this.saveLiveAsVideo = true,
+    this.userName = '小鲸鱼用户',
+    this.avatarPath = '',
   });
 
   AppSettings copyWith({
     bool? autoPaste,
     bool? saveLiveAsVideo,
+    String? userName,
+    String? avatarPath,
   }) =>
       AppSettings(
         autoPaste: autoPaste ?? this.autoPaste,
         saveLiveAsVideo: saveLiveAsVideo ?? this.saveLiveAsVideo,
+        userName: userName ?? this.userName,
+        avatarPath: avatarPath ?? this.avatarPath,
       );
 
   Map<String, dynamic> toJson() => {
         'autoPaste': autoPaste,
         'saveLiveAsVideo': saveLiveAsVideo,
+        'userName': userName,
+        'avatarPath': avatarPath,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> j) => AppSettings(
         // 默认开：老版本存过 false 的用户会保留自己的选择，没存过的走新默认值
         autoPaste: j['autoPaste'] != false,
         saveLiveAsVideo: j['saveLiveAsVideo'] != false,
+        userName: (j['userName'] as String?)?.trim().isNotEmpty == true
+            ? (j['userName'] as String).trim()
+            : '小鲸鱼用户',
+        avatarPath: (j['avatarPath'] as String?) ?? '',
       );
 }
 

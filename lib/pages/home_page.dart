@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../data/platforms.dart';
 import '../models/parse_result.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -125,10 +124,10 @@ class _HomePageState extends State<HomePage> {
                             onImageTap: _openImagePreview,
                           ),
                         ],
-                        const SizedBox(height: 17),
-                        _buildGuide(),
-                        const SizedBox(height: 17),
-                        const _Notice(),
+                        // 【已移除「三步搞定」和「使用须知」】
+                        // 用户反馈首页信息太满。操作路径本身很直白
+                        // （粘贴 → 解析 → 保存），不需要再教一遍；
+                        // 版权声明移到「我的 → 关于小鲸鱼」里。
                       ],
                     ),
                   ),
@@ -208,9 +207,9 @@ class _HomePageState extends State<HomePage> {
                       Row(
                         children: [
                           const Expanded(
-                              child: Text('小鲸鱼', style: AppText.brandTitle)),
-                          // 标识放在标题这一行、右对齐 ——
-                          // 挤在平台标签那排会显得杂乱，也没有呼吸感
+                              child: Text('小陈和朋友们的存图小鲸鱼',
+                                  style: AppText.brandTitle)),
+                          // 标识放在标题这一行、右对齐
                           const _LocalBadge(),
                         ],
                       ),
@@ -222,47 +221,15 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            // 【为什么只显示 6 个】原来把 18 个平台全铺出来，
-            // 品牌卡里挤了三四行小圆点，看着很碎、也不好看。
-            // 主页只需要传达「主流平台都支持」——
-            // 完整的列表放到「我的 → 支持平台」里，想看的人去看。
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: kPlatforms
-                  .take(6)
-                  .map((p) => Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 9, vertical: 5.5),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: const Color(0xFFE8EBF2)),
-                          boxShadow: const [
-                            BoxShadow(
-                                color: Color(0x0A1F2A44),
-                                blurRadius: 4,
-                                offset: Offset(0, 1)),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Dot(color: p.color, size: 6),
-                            const SizedBox(width: 5),
-                            Text(p.name, style: AppText.pill),
-                          ],
-                        ),
-                      ))
-                  .toList(),
-            ),
-            const SizedBox(height: 10),
-            // 完整列表放到「我的」页，这里只给一句提示 —— 别让品牌卡太挤
+            // 【用户要求：去掉平台标签那一排】
+            // 原来这里铺 6 个平台小圆点 + 一句「另有 12 个平台支持」，
+            // 品牌卡看着太满。现在只留一句说明，完整的 18 个平台列表
+            // 在「我的 → 支持平台」里看。
+            const SizedBox(height: 14),
             Text(
-              '另有 ${kPlatforms.length - 6} 个平台支持，见「我的 → 支持平台」',
-              style: AppText.pill.copyWith(
-                  fontSize: 10.5, color: const Color(0xFFA8AEB8)),
+              '支持抖音 / 小红书 / B站 / 微博 / 快手 / 知乎等 18 个平台',
+              style: TextStyle(
+                  fontSize: 11.5, color: Color(0xFF9AA1AA), height: 1.5),
             ),
           ],
         ),
@@ -435,101 +402,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /* ------------------------------------------------------------------ */
-  /* 三步搞定 + 使用须知                                                  */
-  /* ------------------------------------------------------------------ */
-
-  Widget _buildGuide() {
-    // 【一步一图标】原来只有「01/02/03」三个数字，看着像表单编号、没有信息量。
-    // 换成「图标徽章 + 序号」：图标一眼说明这一步干什么，
-    // 序号留在右上角保持步骤感。
-    const steps = <List<String>>[
-      ['01', '复制链接', '在 App 里点分享，复制作品链接', 'link'],
-      ['02', '粘贴解析', '回到这里，粘贴后点开始解析', 'parse'],
-      ['03', '保存相册', '选原片版本，一键存进相册', 'check'],
-    ];
-
-    Widget _badge(String kind) {
-      switch (kind) {
-        case 'link':
-          return AppIcons.link(AppColors.blue, 13);
-        case 'parse':
-          return AppIcons.parse(AppColors.blue, 13);
-        default:
-          return AppIcons.check(AppColors.blue, 13);
-      }
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text('三步搞定', style: AppText.sectionTitle),
-            const Spacer(),
-            Text('简单 · 快速 · 本地保存', style: AppText.meta.copyWith(color: const Color(0xFF9CA2AB))),
-          ],
-        ),
-        const SizedBox(height: 9),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: steps
-              .map((st) => Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(right: st[0] == '03' ? 0 : 7),
-                      child: SoftCard(
-                        radius: 13,
-                        padding: const EdgeInsets.fromLTRB(10, 11, 10, 11),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                // 图标徽章
-                                Container(
-                                  width: 24,
-                                  height: 24,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.blueSoft,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Center(child: _badge(st[3])),
-                                ),
-                                const Spacer(),
-                                Text(st[0],
-                                    style: const TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: Color(0xFFB9C2D6),
-                                      letterSpacing: 0.4,
-                                      height: 1.1,
-                                    )),
-                              ],
-                            ),
-                            const SizedBox(height: 9),
-                            Text(st[1],
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.text,
-                                    height: 1.2)),
-                            const SizedBox(height: 5),
-                            Text(st[2],
-                                style: const TextStyle(
-                                    fontSize: 10.5,
-                                    color: Color(0xFF9AA1AA),
-                                    height: 1.45)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ))
-              .toList(),
-        ),
-      ],
-    );
-  }
 }
 
 /* ==================================================================== */
@@ -1075,33 +947,6 @@ class _PlayTrianglePainter extends CustomPainter {
 /* 使用须知                                                              */
 /* ==================================================================== */
 
-class _Notice extends StatelessWidget {
-  const _Notice();
-
-  @override
-  Widget build(BuildContext context) {
-    return SoftCard(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('使用须知',
-              style: AppText.cardTitle.copyWith(fontSize: 12.5, color: AppColors.text2)),
-          const SizedBox(height: 6),
-          ...const [
-            '本工具仅用于个人学习与内容备份',
-            '请勿用于商业传播或二次分发他人作品',
-            '所下载内容的版权均归原作者所有',
-          ].map((t) => Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(t,
-                    style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.8)),
-              )),
-        ],
-      ),
-    );
-  }
-}
 
 /* ==================================================================== */
 /* 下载进度浮层                                                          */
