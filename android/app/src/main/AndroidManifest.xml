@@ -1,6 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 解析与下载都需要联网 -->
+    <!--
+      ⚠️ 权限策略（2026-10 安全整改，见 README「关于安全扫描」）
+
+      这里刻意只保留「解析和保存」真正需要的最小权限集。
+      每多一个权限、尤其是「安装应用」「读写全盘」「读取应用列表」这类，
+      都会抬高国产安全引擎（腾讯/安天病毒库，小米/OPPO/vivo/华为都在用）
+      的评分，最终被标成 a.gray.* 灰色软件。
+
+      历史包袱说明：
+        v0.0.5 及以前声明过 REQUEST_INSTALL_PACKAGES（应用内下载 APK 后
+        拉起系统安装器）。这个组合——「联网下载可执行文件 + 请求安装」——
+        在静态扫描里和推广/捆绑类恶意软件无法区分，是当初被判高危的
+        最大单一原因。v0.0.6 起**彻底移除**：更新改为打开浏览器下载页，
+        由系统下载器和系统安装流程接管。
+    -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
@@ -14,36 +28,21 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"/>
 
-    <!--
-      应用内更新：下载完新版本后拉起系统安装器。
-      这只是「允许本 App 发起安装」，用户仍会在系统弹窗里再确认一次 ——
-      Android 不允许静默安装，这是安全设计。
-    -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
-
     <application
         android:label="小鲸鱼"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:usesCleartextTraffic="true"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config">
 
         <!--
-          把下载好的更新包交给系统安装器。
-          Android 7.0 起禁止直接传 file:// URI（会抛 FileUriExposedException），
-          必须通过 FileProvider 转成 content:// 并临时授权。
-          路径白名单见 res/xml/file_paths.xml —— 只暴露 cache/apk/。
+          usesCleartextTraffic=false + network_security_config 全量禁止明文：
+          小鲸鱼访问的平台接口、CDN、更新清单全部是 HTTPS，没有任何理由
+          保留 HTTP 回退。开着明文除了安全风险，也会被扫描器记为可疑项。
+          allowBackup=false：解析历史只留在本机，不参与云备份。
         -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
 
         <activity
             android:name=".MainActivity"
@@ -77,7 +76,10 @@
          https://developer.android.com/training/package-visibility and
          https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
 
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin.
+         这是 Flutter 引擎自带的、范围最小的一条可见性声明。除此之外不再
+         声明任何 <queries>，也不申请 QUERY_ALL_PACKAGES —— 小鲸鱼不需要
+         知道用户装了哪些 App。 -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>

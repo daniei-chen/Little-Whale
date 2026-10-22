@@ -2,7 +2,7 @@ name: flashsave
 description: "小鲸鱼 —— 多平台视频/图文链接解析与保存工具，本地解析、保存无水印原片"
 publish_to: 'none'
 
-version: 0.0.5+5
+version: 0.0.6+6
 
 environment:
   sdk: ^3.13.3
@@ -49,6 +49,25 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
+# ---------------------------------------------------------------------------
+# 依赖覆盖：把 path_provider_android 钉在 2.2.x
+# ---------------------------------------------------------------------------
+# 【为什么钉死】
+# path_provider_android 从 2.3.0（2026-04）起改用 dart_lang/jni 实现，
+# 会连带引入 jni + jni_flutter，最终在 APK 里多出：
+#   · classes.dex 中的 com.github.dart_lang.jni.JniPlugin
+#     —— 一个能加载任意 Java 类、调用任意静态/实例方法的通用 JNI 桥
+#   · lib/<abi>/libdartjni.so、libdatastore_shared_counter.so
+#
+# 小鲸鱼只用 getTemporaryDirectory() 一个 API，根本不需要 JNI。
+# 而在静态扫描眼里，「Flutter 应用 + 通用 JNI 反射调用桥 + 混淆后的
+# libapp.so」是典型的可疑组合，会给 a.gray.* 这类启发式判定加分。
+#
+# 我们只需要拿临时目录。2.2.21 走的还是老的原生实现，功能够用、
+# 不带 jni。等哪天 path_provider 上游能按需裁剪，再把这段删掉。
+dependency_overrides:
+  path_provider_android: 2.2.21
 
 flutter:
   uses-material-design: true

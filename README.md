@@ -248,10 +248,14 @@ App 内建自动检查，**不需要用户翻墙**：
 - 启动 3 秒后静默检查，只有真有新版才弹窗
 - 同一个版本 **24 小时内只提醒一次**
 - 网络失败**静默跳过** —— 更新检查永远不打扰用户
-- 点「立即更新」→ **App 内下载**（带进度条、可续传）→ 拉起系统安装器
+- 点「立即更新」→ **打开浏览器下载页**，由系统下载器和系统安装流程接管
 
-> **安装那一步必须弹系统确认框** —— Android 不允许静默安装，这是系统安全设计，
-> 绕不过去也不该绕。
+> **v0.0.6 起 App 不再自己下载安装包。**
+> v0.0.5 及以前是「App 内下载 APK → FileProvider → 拉起系统安装器」，体验更好
+> （带进度条、可续传）。但那需要 `REQUEST_INSTALL_PACKAGES` 权限 + FileProvider +
+> `application/vnd.android.package-archive`，这套特征在国产安全引擎里和「推广/捆绑/
+> 自我更新」类灰色软件完全重合 —— 它正是本项目被判 `a.gray.BulimiaTGen.f` 的
+> 最大单一原因（见下方「关于安全扫描」）。代价只是少一次跳转，换整包脱离高危画像。
 
 **为什么不用 GitHub 原始地址**：`raw.githubusercontent.com` 在国内被墙，
 Release 附件走的 `objects.githubusercontent.com` 国内也基本连不上。
@@ -260,17 +264,61 @@ Release 附件走的 `objects.githubusercontent.com` 国内也基本连不上。
 
 ### 签名说明
 
-发布签名有两把（都在 `android/keystore/`，**不进仓库**）：
+发布签名由 `android/key.properties` + `android/keystore/xiaojingyu.jks` 提供，
+**两者都不进仓库**（已写入 `.gitignore`，含 `**/*.jks` 兜底）。
 
-| 文件 | 用途 |
+当前使用（v0.0.6 起）的证书：
+
+| 项 | 值 |
 |---|---|
-| `xiaojingyu-release.jks` | **当前使用**（正式证书，`CN=Little Whale, O=Little Whale Studio`） |
-| `xiaojingyu.jks` | 历史调试签名，仅存档 |
+| Subject | `CN=Little Whale, OU=Mobile, O=Little Whale Studio, L=Shenzhen, ST=Guangdong, C=CN` |
+| 算法 | RSA 2048 / SHA256withRSA |
+| 证书 SHA-256 | `f2c266e8fc8bacdc7aaab93eb14638222d2f2f95d03d174fe503b49c55823827` |
+| 签名方案 | APK Signature Scheme **v2 + v3**（minSdk 24，不需要 v1） |
 
-> ⚠️ v0.0.5 起换成了正式签名 —— 旧版用的是 Android 调试证书（`CN=Android Debug`），
-> 被手机安全中心判成「高风险」（`a.gray.BulimiaTGen.f`）。
-> **换了签名的代价**：已装旧版的用户无法覆盖升级，必须先卸载。
-> 已保存到相册的文件不受影响，只有解析记录会清空。
+签名历史与代价：
+
+| 版本 | 签名 | 说明 |
+|---|---|---|
+| v0.0.1 ~ v0.0.3 | Android 调试证书（`CN=Android Debug`） | 被安全中心判高风险，必须换 |
+| v0.0.5 | 正式证书（私钥已丢失） | 曾以为换签名就能解决报毒 —— **这个判断是错的**，一个月后病毒库更新，同一规则再次命中 |
+| v0.0.6 起 | 上表的新证书 | 原私钥已无法找回，只能重新生成 |
+
+> ⚠️ **三条必须记住的事**
+>
+> 1. **换签名 = 老用户必须卸载重装。** 已装 v0.0.5 及更早版本的设备无法覆盖升级，
+>    会提示「应用未安装」。卸载会清空解析记录，**已保存到相册的图片/视频不受影响**。
+> 2. **换签名并不能根治报毒。** 只是让新包进入一段观察期。真正的解法是
+>    [误报申诉](docs/COMPLAINT-TENCENT.md) 加白 + 上架正规应用商店，详见
+>    [安全说明](docs/SECURITY.md)。
+> 3. **`android/keystore/xiaojingyu.jks` 必须离线备份。** 再丢一次，所有已装用户
+>    都只能卸载重装，且无法挽回。
+
+### 关于安全扫描（为什么会被判成"高危病毒"）
+
+如果你是从 Releases 下载安装的，手机管家可能弹出红色警告：
+
+```
+发现风险：安装该应用存在高风险
+【高风险】包含病毒：a.gray.BulimiaTGen.f
+```
+
+**这不是病毒。** 结论和完整证据见：
+
+- **[docs/SECURITY.md](docs/SECURITY.md)** —— 面向用户：为什么会被报、能不能放心装、被拦截怎么办
+- **[docs/SAFE-INSTALL.md](docs/SAFE-INSTALL.md)** —— 怎么核对哈希与签名、MIUI 拦截弹窗逐屏处理
+- **[docs/COMPLAINT-TENCENT.md](docs/COMPLAINT-TENCENT.md)** —— 可直接提交给腾讯的误报申诉材料
+
+一句话版本：`a.gray.*` 是腾讯移动安全实验室的**启发式灰色软件家族**，随病毒库分发给
+小米/OPPO/vivo/华为的手机管家。它由「个人自签证书 + 未上架商店 + 具备下载并安装可执行
+文件的能力 + 功能面较宽」这类**特征聚类**触发，不是扫到了恶意代码。
+
+`docs/` 里有逐条可复现的自查命令。你也可以自己验证：本仓库全部源码开放，反编译 DEX
+检索 `DexClassLoader` / `Runtime.exec` / 广告 SDK，都会是 0 命中。
+
+**v0.0.6 针对这个判定做了 7 项整改**（详见 [CHANGELOG.md](CHANGELOG.md)），其中影响最大的是
+彻底移除应用内安装 APK 的能力。但请理解：**整改能大幅降低命中概率，不等于 100% 不再报。**
+最终判定权在厂商病毒库，根治要靠申诉加白或上架正规商店。
 
 ---
 

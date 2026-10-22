@@ -6,11 +6,11 @@
 library;
 
 /// 展示给用户的版本号，必须与 pubspec.yaml 的 `version:` 前半段一致
-const String kAppVersion = '0.0.5';
+const String kAppVersion = '0.0.6';
 
-/// 构建号，必须与 pubspec.yaml 的 `version:` 后半段一致（`0.0.3+3` 里的 3）。
+/// 构建号，必须与 pubspec.yaml 的 `version:` 后半段一致（`0.0.6+6` 里的 6）。
 /// **更新判断只比这个数**，比字符串版本号可靠。
-const int kAppBuild = 5;
+const int kAppBuild = 6;
 
 /* ---------------------------------------------------------------------- */
 /* 更新检查                                                                */

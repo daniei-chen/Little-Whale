@@ -1,7 +1,4 @@
-import 'dart:io';
-
 import 'package:dio/dio.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config.dart';
@@ -14,8 +11,10 @@ class UpdateInfo {
   final String notes;
   final bool force;
 
-  /// 安装包大小（字节）。清单里没给就是 0 ——
-  /// 用来判断「上次是不是已经下完了」，以及显示进度。
+  /// 安装包大小（字节）。清单里没给就是 0。
+  ///
+  /// v0.0.6 起 App **不再下载安装包**，所以这个字段只用于在
+  /// 「有新版」对话框里顺带告诉用户「大概多大」，不参与任何逻辑。
   final int size;
 
   const UpdateInfo({
@@ -55,7 +54,20 @@ class UpdateInfo {
 ///
 /// 【为什么不用 Google 的应用内更新】国内设备上 Google Play 服务大多不可用，
 /// 那条路走不通。所以这里走最朴素也最可靠的方式：
-/// 从**自己的服务器**拉一个 JSON，比构建号，比出来就提示 + 跳下载。
+/// 从**自己的服务器**拉一个 JSON，比构建号，比出来就提示 + 跳下载页。
+///
+/// 【为什么只检查、不下载（v0.0.6 整改）】
+/// v0.0.5 及以前是「App 内下载 APK → 拉起系统安装器」。功能上没问题，
+/// 但静态扫描眼里这套组合是：
+///     REQUEST_INSTALL_PACKAGES + 下载 .apk + ACTION_VIEW
+///     + application/vnd.android.package-archive
+/// 和推广/捆绑/自我更新的灰色软件特征完全重合 —— 这是包被判
+/// a.gray.BulimiaTGen.f（进而被 MIUI 高危拦截、反诈中心来电核实）
+/// 的最大单一原因。
+///
+/// 所以现在职责只剩一件事：**告诉用户有没有新版，并把下载页交出去**。
+/// App 自身不再写入任何 .apk 文件、不再持有安装相关权限、不再请求安装。
+/// 代价是更新少了个进度条，换来的是不再被当成高危应用 —— 这个交换值得。
 class UpdateService {
   UpdateService._();
   static final UpdateService instance = UpdateService._();
@@ -109,57 +121,5 @@ class UpdateService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_prefsKey, build);
     } catch (_) {}
-  }
-  /* ------------------------------------------------------------------ */
-  /* 应用内下载新版本                                                     */
-  /* ------------------------------------------------------------------ */
-
-  /// 把新版本 APK 下到应用缓存目录，返回文件路径。
-  ///
-  /// 【为什么要下到缓存目录而不是相册】
-  /// 更新包是临时的，不该出现在用户的相册里。放 cache/apk/ 下：
-  /// 系统空间紧张时能自动回收，也不会污染用户的照片。
-  /// FileProvider 的白名单里只暴露了这个目录（见 res/xml/file_paths.xml）。
-  Future<String> downloadApk(
-    UpdateInfo info, {
-    void Function(double progress, int received, int total)? onProgress,
-  }) async {
-    final dir = Directory('${(await getTemporaryDirectory()).path}/apk');
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-
-    // 文件名带版本和构建号，避免和上一版混淆（也便于续传时识别）
-    final file = File('${dir.path}/xiaojingyu-${info.version}-${info.build}.apk');
-
-    // 已经下好且大小对得上，直接复用 —— 用户可能点了取消又想装
-    if (await file.exists() && info.size > 0 && await file.length() == info.size) {
-      onProgress?.call(1, info.size, info.size);
-      return file.path;
-    }
-
-    final done = file.existsSync() ? await file.length() : 0;
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(minutes: 30),
-      validateStatus: (s) => s != null && s < 400,
-      headers: {
-        'User-Agent':
-            'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
-      },
-    ));
-
-    await dio.download(
-      info.url,
-      file.path,
-      // 断点续传：上次下到一半就接着下
-      options: Options(headers: done > 0 ? {'Range': 'bytes=$done-'} : null),
-      deleteOnError: false,
-      onReceiveProgress: (received, total) {
-        final full = total > 0 ? total + done : (info.size > 0 ? info.size : 0);
-        final got = received + done;
-        onProgress?.call(full > 0 ? (got / full).clamp(0, 1) : 0, got, full);
-      },
-    );
-
-    return file.path;
   }
 }

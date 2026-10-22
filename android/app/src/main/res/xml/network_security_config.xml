@@ -1,17 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  明文（HTTP）流量策略。
+  明文（HTTP）流量策略 —— 全量禁止。
 
-  为什么要放行：
-    · 开发调试时后端是 http://10.0.2.2:8787（模拟器访问宿主机）或局域网 http://192.168.x.x
-    · 自建服务在上 HTTPS 之前也用 http
-  Android 9 起默认禁止明文请求，不放行的话这些场景会直接连不上。
+  【v0.0.6 收紧】
+  v0.0.5 及以前这里是 cleartextTrafficPermitted="true"，同时 AndroidManifest
+  里还有 usesCleartextTraffic="true"。理由原本是「开发调试时后端是
+  http://10.0.2.2:8787 或局域网 http://192.168.x.x」。
 
-  注意：正式发布时你的服务应该是 HTTPS，那样这条策略根本用不到。
-  如果你确定只用 HTTPS，可以把下面改成 cleartextTrafficPermitted="false" 更安全。
+  但这就是把**调试便利**留进了发布包：
+    · 小鲸鱼真正访问的东西——18 个平台的接口、CDN 直链、更新清单——
+      全部是 HTTPS，没有任何一处需要明文回退
+    · "任意明文流量放行" 在安全扫描里是一条稳定的可疑特征（中间人注入面）
+
+  所以现在两层都关掉：
+    · AndroidManifest: android:usesCleartextTraffic="false"
+    · 本文件: cleartextTrafficPermitted="false"
+
+  需要在本机调试 http 后端怎么办？
+  用 android/app/src/debug/ 的 manifest 覆盖（debug 变体单独放行），
+  不要改这个 main 变体的文件 —— 那是会打进正式包的。
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system"/>
         </trust-anchors>
