@@ -155,7 +155,33 @@ GenericLocalPlatform(
 }
 ```
 
-用户可以在「我的 → 解析偏好 → 动图存成视频」里切换：存成短视频，或只存静态封面。
+**保存方式三选一**（「我的 → 解析偏好 → 动图保存方式」）：
+
+| 档位 | 产出 | 特点 |
+|---|---|---|
+| 短视频（默认） | `.mp4` | 保真：动效和声音都在，相册归到「视频」 |
+| **GIF 动图**（v0.0.7 新增） | `.gif` | 相册归到「图片」，能当表情直接发微信；**没有声音**、体积约 2~5 MB |
+| 静态封面 | `.jpg` | 只存第一帧，最省空间 |
+
+GIF 是**本地合成**的，三道工序都在手机上完成：
+
+```
+MediaMetadataRetriever 抽帧（8fps，OPTION_CLOSEST）
+  → Canvas 等比缩放到 400 宽（强制 ARGB_8888）
+  → NeuQuant 256 色量化 + LZW 编码 → .gif
+```
+
+> **抽帧必须用 `OPTION_CLOSEST`，不能用 `OPTION_CLOSEST_SYNC`。** 后者只返回关键帧，
+> 而这类动图视频只有 2~3 秒、关键帧间隔 1~2 秒 —— 抽 20 帧会得到 2~3 张图重复 20 次，
+> GIF 看起来"卡住不动"。pub.dev 上几个现成的「视频转 GIF」插件都踩了这个坑。
+>
+> 编码器是**内置的纯 Java 实现**（源自 Glide 的 `gif_encoder`，已本地修正一处
+> Canvas 绘制对象写错的 bug），**没有引入任何 native `.so`**。
+
+**为什么不做动图 WebP**：Android 的 `Bitmap.compress` 只能编静态 WebP，动图 WebP 必须
+内置 libwebp 原生库。v0.0.6 刚为误报问题清理过原生库（见「关于安全扫描」），
+不值得为一个动图功能再把 `.so` 引回来。GIF 是唯一零原生依赖、且所有相册和微信
+都能直接播的格式。
 
 ### 老机型兼容：HEIC → JPEG
 
@@ -374,17 +400,22 @@ lib/
 │   ├── kuaishou.dart          快手
 │   └── zhihu.dart             知乎
 ├── services/
-│   ├── download_service.dart  下载：断点续传、按文件头定后缀
-│   ├── update_service.dart    检查更新 + 应用内下载
-│   ├── installer.dart         拉起系统安装器（原生 MethodChannel）
+│   ├── download_service.dart  下载：断点续传、按文件头定后缀、动图转 GIF
+│   ├── gif_service.dart       动图视频 → GIF（走原生通道，纯本地）
+│   ├── update_service.dart    检查更新（只提示 + 开浏览器，不下载安装包）
 │   └── crash_log.dart         本地错误日志
+├── models/
+│   ├── parse_result.dart      解析结果模型
+│   └── motion_mode.dart       动图保存方式三档（短视频 / GIF / 静态封面）
 ├── widgets/
 │   ├── net_image.dart         带 Referer 的图片（列表一律用它）
 │   └── image_viewer.dart      全屏预览
 ├── pages/                     首页 / 记录 / 我的
 └── state/app_state.dart       全局状态
 
-android/app/src/main/kotlin/.../MainActivity.kt   应用内安装的 MethodChannel
+android/app/src/main/kotlin/.../MainActivity.kt   动图转 GIF 的 MethodChannel
+android/app/src/main/kotlin/.../gif/VideoToGif.kt 抽帧 + 缩放（OPTION_CLOSEST）
+android/app/src/main/java/.../gif/                内置 GIF 编码器（纯 Java，源自 Glide）
 server/version.json                                更新清单（备用副本）
 tools/
 ├── build.ps1                                        构建（只出 arm64-v8a）

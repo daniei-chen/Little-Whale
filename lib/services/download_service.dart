@@ -6,6 +6,8 @@ import 'package:dio/dio.dart';
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'gif_service.dart';
+
 /// 一次下载的结果
 class DownloadOutcome {
   final bool saved;
@@ -158,6 +160,74 @@ class DownloadService {
       // 相册已经拿到副本，临时文件立刻清掉，避免占用户存储
       try {
         if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+    }
+  }
+
+  /// 保存动图为 **GIF**（v0.0.7 新增的第三种动图形态）。
+  ///
+  /// 三步：下载那段短视频 → 本地转 GIF → 存进相册图片区。
+  ///
+  /// 【为什么存 GIF 要绕这么大一圈】
+  /// 动图的原始素材只有「静态封面 + 短视频」两种东西，GIF 必须现场合成。
+  /// 好处是产出物是一张**真正的图片**：相册归到图片分类、能当表情直接发微信，
+  /// 而不是一个只有点开才动的短视频。
+  ///
+  /// 【代价】GIF 没有音轨、体积明显更大（256 色 + 无帧间压缩）。
+  /// 设置里另外两档就是给不想付这个代价的人留的。
+  Future<DownloadOutcome> fetchLiveAsGif({
+    required String videoUrl,
+    required String referer,
+    String album = '小鲸鱼',
+    String? fileHint,
+    void Function(double progress)? onProgress,
+    VoidCallback? onConverting,
+  }) async {
+    if (videoUrl.isEmpty) {
+      return const DownloadOutcome(saved: false, message: '动图视频地址为空');
+    }
+
+    File? video;
+    File? gif;
+    try {
+      // 1) 下载短视频 —— 复用主下载路径，断点续传、按文件头定后缀都是现成的
+      video = await _download(videoUrl, referer, fileHint, '', true, onProgress);
+
+      // 2) 转 GIF
+      onConverting?.call();
+      final gifPath = video.path.replaceFirst(RegExp(r'\.[A-Za-z0-9]+$'), '.gif');
+      final res = await GifService.videoToGif(
+        videoPath: video.path,
+        gifPath: gifPath,
+      );
+      if (!res.ok) {
+        return DownloadOutcome(
+          saved: false,
+          message: res.message.isEmpty ? '转 GIF 失败' : '转 GIF 失败（${res.message}）',
+        );
+      }
+      gif = File(gifPath);
+      if (!await gif.exists() || await gif.length() <= 0) {
+        return const DownloadOutcome(saved: false, message: '生成的 GIF 是空的');
+      }
+
+      // 3) 存相册 —— gal 按文件扩展名走 IMAGE_URI，.gif 会正确归为图片
+      await Gal.putImage(gif.path, album: album);
+      return DownloadOutcome(
+        saved: true,
+        message: '已存为 GIF（${res.kb.toStringAsFixed(0)} KB）',
+      );
+    } on GalException catch (e) {
+      return DownloadOutcome(saved: false, message: _galMessage(e));
+    } catch (e) {
+      return DownloadOutcome(saved: false, message: '保存动图失败：$e');
+    } finally {
+      // 相册拿到副本后临时文件立刻清掉，别占用户存储
+      try {
+        if (video != null && await video.exists()) await video.delete();
+      } catch (_) {}
+      try {
+        if (gif != null && await gif.exists()) await gif.delete();
       } catch (_) {}
     }
   }

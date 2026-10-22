@@ -17,6 +17,7 @@ import 'package:flashsave/local/registry.dart';
 import 'package:flashsave/config.dart';
 import 'package:flashsave/data/platforms.dart';
 import 'package:flashsave/data/local_store.dart';
+import 'package:flashsave/models/motion_mode.dart';
 import 'package:flashsave/models/parse_result.dart';
 import 'package:flashsave/services/download_service.dart';
 import 'package:flashsave/widgets/net_image.dart';
@@ -541,7 +542,7 @@ void main() {
     expect(find.text('解析记录'), findsOneWidget);
     expect(find.text('使用教程'), findsOneWidget);
     expect(find.text('进 App 自动识别剪贴板'), findsOneWidget);
-    expect(find.text('动图存成视频'), findsOneWidget);
+    expect(find.text('动图保存方式'), findsOneWidget);
     // 服务器那套已经整体移除，不该再出现在任何地方
     expect(find.text('解析方式'), findsNothing);
     expect(find.text('服务器'), findsNothing);
@@ -564,7 +565,7 @@ void main() {
 
     // 但偏好开关还在，而且加了动图这项
     expect(find.text('进 App 自动识别剪贴板'), findsOneWidget);
-    expect(find.text('动图存成视频'), findsOneWidget);
+    expect(find.text('动图保存方式'), findsOneWidget);
   });
 
   testWidgets('三个 tab 都能来回切', (tester) async {
@@ -582,6 +583,53 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('开始解析'), findsOneWidget);
   });
+  group('动图保存方式（v0.0.7 从开关改成三档）', () {
+    test('三档都能正确往返 JSON', () {
+      for (final m in MotionMode.values) {
+        final json =
+            jsonDecode(jsonEncode(AppSettings(motionMode: m).toJson())) as Map<String, dynamic>;
+        expect(AppSettings.fromJson(json).motionMode, m, reason: '${m.name} 往返后应保持不变');
+      }
+    });
+
+    test('老版本的 saveLiveAsVideo 字段要能平滑迁移', () {
+      expect(
+        AppSettings.fromJson({'saveLiveAsVideo': true}).motionMode,
+        MotionMode.video,
+        reason: '老用户开着「存成视频」，升级后不能变成别的档',
+      );
+      expect(
+        AppSettings.fromJson({'saveLiveAsVideo': false}).motionMode,
+        MotionMode.cover,
+        reason: '老用户关掉了，原来是只存静态封面',
+      );
+    });
+
+    test('新字段优先于老字段', () {
+      // 理论上不会同时出现，但真出现了要认新的
+      expect(
+        AppSettings.fromJson({'motionMode': 'gif', 'saveLiveAsVideo': false}).motionMode,
+        MotionMode.gif,
+      );
+    });
+
+    test('配置里写了奇怪的值也不会崩，回落到默认档', () {
+      expect(AppSettings.fromJson({'motionMode': '???'}).motionMode, MotionMode.video);
+      expect(AppSettings.fromJson(const {}).motionMode, MotionMode.video);
+      expect(AppSettings.fromJson({'motionMode': ''}).motionMode, MotionMode.video);
+      // 默认必须是短视频：用户存动图首要诉求是动效和声音
+      expect(const AppSettings().motionMode, MotionMode.video);
+    });
+
+    test('copyWith 只改动图档位，其它设置不受影响', () {
+      const base = AppSettings(autoPaste: false, userName: '阿鲸', motionMode: MotionMode.video);
+      final next = base.copyWith(motionMode: MotionMode.gif);
+      expect(next.motionMode, MotionMode.gif);
+      expect(next.autoPaste, false);
+      expect(next.userName, '阿鲸');
+    });
+  });
+
   group('本轮新增代码的单元测试', () {
     // ---------------------------------------------------------------
     // 更新清单解析（含安装包大小）

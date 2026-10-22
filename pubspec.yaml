@@ -2,7 +2,7 @@ name: flashsave
 description: "小鲸鱼 —— 多平台视频/图文链接解析与保存工具，本地解析、保存无水印原片"
 publish_to: 'none'
 
-version: 0.0.6+6
+version: 0.0.7+7
 
 environment:
   sdk: ^3.13.3
@@ -41,7 +41,6 @@ dependencies:
   image_picker: ^1.1.2
 
   cupertino_icons: ^1.0.8
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

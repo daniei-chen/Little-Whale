@@ -7,6 +7,7 @@ import '../data/local_store.dart';
 import '../data/platforms.dart';
 import '../local/registry.dart';
 import '../local/types.dart' as lt;
+import '../models/motion_mode.dart';
 import '../models/parse_result.dart';
 import '../services/download_service.dart';
 
@@ -45,12 +46,17 @@ class AppState extends ChangeNotifier {
 
   /* ---------------- 动图偏好 ---------------- */
 
-  /// 动图存成视频还是静态图（跟设置里的开关同步）
-  bool get saveLiveAsVideo => settings.saveLiveAsVideo;
+  /// 动图存成什么：短视频 / GIF 动图 / 静态封面（跟设置页同步）
+  MotionMode get motionMode => settings.motionMode;
 
-  void setSaveLiveAsVideo(bool v) {
-    updateSettings(settings.copyWith(saveLiveAsVideo: v));
+  void setMotionMode(MotionMode v) {
+    updateSettings(settings.copyWith(motionMode: v));
   }
+
+  /// 这条结果里有没有动图，且当前偏好不是「只存静态封面」——
+  /// 用来决定保存按钮上要不要提示「会转成 GIF」。
+  bool get willConvertGif =>
+      motionMode == MotionMode.gif && (result?.hasLivePhotos ?? false);
 
   /* ---------------- 图片多选 ---------------- */
 
@@ -404,6 +410,59 @@ class AppState extends ChangeNotifier {
     return outcome;
   }
 
+  /// 按当前「动图保存方式」保存单张图。批量保存和单张保存共用这一处，
+  /// 避免两条路径的动图逻辑各写一遍、日后改一处漏一处。
+  ///
+  /// 三档分流：
+  ///   · 非动图          → 普通下原图
+  ///   · 动图 + video    → 下那段带音轨短视频
+  ///   · 动图 + gif      → 下视频后本地转 GIF（v0.0.7 新增）
+  ///   · 动图 + cover    → 只下静态封面
+  Future<DownloadOutcome> _saveOneImage(
+    ResultImage img,
+    String referer,
+    String fileHint, {
+    void Function(double progress)? onProgress,
+  }) {
+    final isLive = img.isLive && img.videoUrl.isNotEmpty;
+
+    if (isLive) {
+      switch (settings.motionMode) {
+        case MotionMode.gif:
+          return DownloadService.instance.fetchLiveAsGif(
+            videoUrl: img.videoUrl,
+            referer: referer,
+            fileHint: fileHint,
+            onProgress: onProgress,
+            onConverting: () {
+              // 下载完到出 GIF 之间要 2~4 秒（抽帧 + 256 色量化），
+              // 不给提示的话进度条会一直停在 100% 让人以为卡死
+              downloadLabel = '正在转 GIF…';
+              notifyListeners();
+            },
+          );
+        case MotionMode.video:
+          return DownloadService.instance.fetchAndSave(
+            proxyUrl: img.videoUrl,
+            isVideo: true,
+            referer: referer,
+            fileHint: fileHint,
+            onProgress: onProgress,
+          );
+        case MotionMode.cover:
+          break; // 落到下面走静态封面
+      }
+    }
+
+    return DownloadService.instance.fetchAndSave(
+      proxyUrl: img.url,
+      isVideo: false,
+      referer: referer,
+      fileHint: fileHint,
+      onProgress: onProgress,
+    );
+  }
+
   /// 只保存指定的一张 —— 预览大图时「保存这张」用。
   ///
   /// 和批量保存分开是有必要的：用户在预览里看中了某一张，
@@ -420,15 +479,11 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     final img = r.images[index];
-    // 动图按用户偏好走：存带音轨的短视频，或只存静态封面
-    final asVideo = img.isLive && settings.saveLiveAsVideo;
-
-    final outcome = await DownloadService.instance.fetchAndSave(
-      proxyUrl: asVideo ? img.videoUrl : img.url,
-      isVideo: asVideo,
-      referer: r.referer,
+    final outcome = await _saveOneImage(
+      img,
+      r.referer,
       // 用原图序号，和批量保存的命名保持一致
-      fileHint: '${r.title}_${index + 1}',
+      '${r.title}_${index + 1}',
       onProgress: (p) {
         downloadProgress = p;
         notifyListeners();
@@ -494,16 +549,12 @@ class AppState extends ChangeNotifier {
         }
 
         final img = r.images[i];
-        // 动图按用户偏好走：存带音轨的短视频，或只存静态封面
-        final asVideo = img.isLive && settings.saveLiveAsVideo;
-
-        outcomes[slot] = await DownloadService.instance.fetchAndSave(
-          proxyUrl: asVideo ? img.videoUrl : img.url,
-          isVideo: asVideo,
-          referer: r.referer,
+        outcomes[slot] = await _saveOneImage(
+          img,
+          r.referer,
           // 编号用**原图序号**而不是选中序号 —— 否则保存第 3、7 张时会变成 _1、_2，
           // 回头根本对不上是作品里的哪张。
-          fileHint: '${r.title}_${i + 1}',
+          '${r.title}_${i + 1}',
           onProgress: (p) {
             each[slot] = p;
             final sum = each.values.fold<double>(0, (a, b) => a + b);

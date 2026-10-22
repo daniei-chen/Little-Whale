@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
 import '../local/registry.dart';
+import '../models/motion_mode.dart';
 import '../services/crash_log.dart';
 import '../services/update_service.dart';
 import '../state/app_state.dart';
@@ -99,14 +100,13 @@ class _MinePageState extends State<MinePage> {
                       subtitle: '识别到支持的链接就直接开始解析',
                       onChanged: (v) => s.updateSettings(s.settings.copyWith(autoPaste: v)),
                     ),
-                    _switchCell(
-                      label: '动图存成视频',
+                    _cell(
+                      context,
                       icon: AppIcons.link(AppColors.blue, 14),
-                      value: s.saveLiveAsVideo,
-                      subtitle: s.saveLiveAsVideo
-                          ? '保留动效与音效，存成短视频'
-                          : '只存静态封面图',
-                      onChanged: s.setSaveLiveAsVideo,
+                      label: '动图保存方式',
+                      value: s.motionMode.label,
+                      subtitle: s.motionMode.description,
+                      onTap: () => _pickMotionMode(context),
                     ),
                   ]),
                   _groupLabel('其他'),
@@ -668,6 +668,84 @@ class _MinePageState extends State<MinePage> {
       behavior: SnackBarBehavior.floating,
       duration: const Duration(seconds: 3),
     ));
+  }
+
+  /// 「动图保存方式」三档选择。
+  ///
+  /// 【为什么从开关改成三选一】v0.0.6 以前只有「存视频 / 不存视频」两档，
+  /// 而「不存视频」等于丢掉动效。v0.0.7 加了 GIF 这一档之后，
+  /// 用户真正想要的是三选一，不是开关。
+  Future<void> _pickMotionMode(BuildContext context) async {
+    final s = AppState.instance;
+    final cur = s.motionMode;
+    final picked = await showDialog<MotionMode>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('动图保存方式',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        contentPadding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final m in MotionMode.values)
+              InkWell(
+                onTap: () => Navigator.pop(ctx, m),
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          m == cur
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_unchecked,
+                          size: 17,
+                          color:
+                              m == cur ? AppColors.blue : const Color(0xFFC2C7CE),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(m.label,
+                                style: const TextStyle(
+                                    fontSize: 13.5, fontWeight: FontWeight.w500)),
+                            const SizedBox(height: 2),
+                            Text(m.description,
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.text2,
+                                    height: 1.35)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: AppColors.text2)),
+          ),
+        ],
+      ),
+    );
+    if (picked != null && picked != cur) {
+      s.setMotionMode(picked);
+      _toast(picked == MotionMode.gif
+          ? '动图会转成 GIF：无声音、体积约 2~5MB'
+          : '动图将存成${picked.label}');
+    }
   }
 
   /// 「支持平台」对话框 —— 完整的 18 个平台列表。

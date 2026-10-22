@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/motion_mode.dart';
 import '../models/parse_result.dart';
 
 /// 偏好设置
@@ -14,11 +15,11 @@ class AppSettings {
   /// 进 App 自动读取剪贴板；识别到支持的平台后**直接开始解析**
   final bool autoPaste;
 
-  /// 动图（Live Photo）存成带音轨的短视频，而不是一张静态封面。
+  /// 动图（Live Photo）存成什么：短视频 / GIF 动图 / 静态封面。
   ///
-  /// 默认开 —— 用户存动图本来就是为了那个动效和声音。
-  /// 想要静态图的可以在设置里关掉。
-  final bool saveLiveAsVideo;
+  /// 默认 [MotionMode.video] —— 用户存动图本来就是为了那个动效和声音。
+  /// v0.0.7 之前这里是 bool（存视频 / 不存视频），见下面 fromJson 的迁移逻辑。
+  final MotionMode motionMode;
 
   /// 用户自己起的昵称（「我的」页显示，可改）
   final String userName;
@@ -28,27 +29,27 @@ class AppSettings {
 
   const AppSettings({
     this.autoPaste = true,
-    this.saveLiveAsVideo = true,
+    this.motionMode = MotionMode.video,
     this.userName = '小鲸鱼用户',
     this.avatarPath = '',
   });
 
   AppSettings copyWith({
     bool? autoPaste,
-    bool? saveLiveAsVideo,
+    MotionMode? motionMode,
     String? userName,
     String? avatarPath,
   }) =>
       AppSettings(
         autoPaste: autoPaste ?? this.autoPaste,
-        saveLiveAsVideo: saveLiveAsVideo ?? this.saveLiveAsVideo,
+        motionMode: motionMode ?? this.motionMode,
         userName: userName ?? this.userName,
         avatarPath: avatarPath ?? this.avatarPath,
       );
 
   Map<String, dynamic> toJson() => {
         'autoPaste': autoPaste,
-        'saveLiveAsVideo': saveLiveAsVideo,
+        'motionMode': motionMode.storageName,
         'userName': userName,
         'avatarPath': avatarPath,
       };
@@ -56,12 +57,30 @@ class AppSettings {
   factory AppSettings.fromJson(Map<String, dynamic> j) => AppSettings(
         // 默认开：老版本存过 false 的用户会保留自己的选择，没存过的走新默认值
         autoPaste: j['autoPaste'] != false,
-        saveLiveAsVideo: j['saveLiveAsVideo'] != false,
+        motionMode: _migrateMotionMode(j),
         userName: (j['userName'] as String?)?.trim().isNotEmpty == true
             ? (j['userName'] as String).trim()
             : '小鲸鱼用户',
         avatarPath: (j['avatarPath'] as String?) ?? '',
       );
+
+  /// 读取动图保存方式，并兼容 v0.0.6 及更早的字段。
+  ///
+  /// 老版本存的是 `saveLiveAsVideo: bool`：
+  ///   true  → 存带音轨短视频  → [MotionMode.video]
+  ///   false → 只存静态封面    → [MotionMode.cover]
+  /// 用户升级后应该保持自己原来的选择，不能被静默改成新默认值。
+  static MotionMode _migrateMotionMode(Map<String, dynamic> j) {
+    final raw = j['motionMode'];
+    if (raw is String && raw.isNotEmpty) {
+      return MotionMode.fromName(raw);
+    }
+    final legacy = j['saveLiveAsVideo'];
+    if (legacy is bool) {
+      return legacy ? MotionMode.video : MotionMode.cover;
+    }
+    return MotionMode.video;
+  }
 }
 
 /// 解析统计
