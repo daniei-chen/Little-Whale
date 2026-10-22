@@ -223,10 +223,48 @@ void main() {
       expect(UpdateInfo.fromJson('垃圾数据'), isNull);
       expect(UpdateInfo.fromJson(null), isNull);
 
-      // 缺 url：**测试环境没有注入 DOWNLOAD_PAGE**，所以下载地址是空的，
-      // 等于「有新版却点不动」，应当当脏数据丢掉。
-      // （真机上有注入，这条会走另一条分支 —— 见下面那条测试）
-      expect(UpdateInfo.fromJson({'build': 5}), isNull);
+      // 缺 url：v0.0.9 起 kDownloadPageUrl 有默认兜底（指向 Releases），
+      // 所以这条更新信息应当被保留、并回落到默认下载页 ——
+      // 而不是像以前那样因为「没注入下载页就丢掉」，导致有新版却点不动。
+      final noUrl = UpdateInfo.fromJson({'build': 5});
+      expect(noUrl, isNotNull, reason: '缺 url 应回落到默认下载页，不该丢掉整条更新信息');
+      expect(noUrl!.url, isNotEmpty);
+      expect(noUrl.url, contains('releases'),
+          reason: '默认下载页应当指向 GitHub Releases');
+    });
+
+    test('更新地址必须有默认值 —— 防止忘记注入就静默失效', () {
+      // 【这条是事故回归测试】v0.0.6~v0.0.8 踩过的坑：
+      // 三个地址都是纯 String.fromEnvironment(...)，没传 --dart-define
+      // 就是空字符串，而 UpdateService.check() 遇到空的主地址直接 return null。
+      // 结果是「构建时忘了配地址」不报错、不警告，整个更新检测静默失效，
+      // 用户在 App 里永远等不到更新提示。
+      // 现在三个常量都带了 defaultValue，这条断言防止有人把它们改回裸调用。
+      expect(kUpdateManifestUrl, isNotEmpty,
+          reason: '主清单地址不能为空，否则更新检测会整体失效');
+      expect(kUpdateManifestUrlAlt, isNotEmpty,
+          reason: '备用清单地址不能为空，否则 CDN 缓存旧清单时没有兜底');
+      expect(kDownloadPageUrl, isNotEmpty,
+          reason: '下载页不能为空，否则用户点「立即更新」打不开任何东西');
+    });
+
+    test('仓库里的 server/version.json 必须能被 App 正确解析', () {
+      // 这份清单就是 App 实际读的东西（经 jsDelivr 转发）。它写坏了、
+      // 或者发版时忘了同步 build 号，后果都是静默的：用户收不到更新，
+      // 或者被提示「更新」到自己已经装的版本。所以拿真文件来断言。
+      final file = File('server/version.json');
+      expect(file.existsSync(), isTrue, reason: '更新清单文件不见了');
+
+      final info = UpdateInfo.fromJson(jsonDecode(file.readAsStringSync()));
+      expect(info, isNotNull, reason: '线上清单解析失败 —— 用户永远收不到更新提示');
+      expect(
+        info!.build,
+        kAppBuild,
+        reason: '清单的 build ($info.build) 必须等于当前 kAppBuild ($kAppBuild)：'
+            '小了用户收不到更新，大了会把自己当成新版推给用户',
+      );
+      expect(info.version, kAppVersion, reason: '清单版本号要和 config.dart 一致');
+      expect(info.url, isNotEmpty, reason: '下载地址不能空，否则点了更新没反应');
     });
   });
   group('平台列表一致性（防止界面和解析器脱节）', () {

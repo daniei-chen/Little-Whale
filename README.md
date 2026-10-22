@@ -291,17 +291,38 @@ MediaMetadataRetriever 抽帧（8fps，OPTION_CLOSEST）
 
 ## 版本更新
 
-App 内建自动检查，**不需要用户翻墙**：
+App 内建自动检查，**不需要用户翻墙、也不需要自建服务器**：
 
 ```
-主地址   https://<自建域名>/app/version.json          ← 构建时注入，不写进仓库
-备用地址 https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json
+主清单  https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json
+备用    https://raw.githubusercontent.com/daniei-chen/Little-Whale/main/server/version.json
+下载页  https://github.com/daniei-chen/Little-Whale/releases/latest
 ```
 
-> **为什么不把主地址写在这里**：主地址是**构建时注入**的（见 `lib/config.dart`），
-> 仓库里不保存，避免服务器地址被公开收录。
+清单就是本仓库里的 [`server/version.json`](server/version.json)，经 jsDelivr 转发
+（国内可直连）。**每次发版只要更新这个文件并推到 `main`，所有用户的 App 就会收到提示。**
 
-两个地址**任一可用**就能检查到更新，单一渠道挂掉不影响。
+三个地址在 `lib/config.dart` 里都有 `defaultValue`，可以用 `--dart-define` 覆盖成
+自己的服务器，但**即使不覆盖也能正常工作**。
+
+> **这条默认值是踩坑换来的**：v0.0.6 ~ v0.0.8 用的是裸 `String.fromEnvironment(...)`，
+> 没注入就是空字符串，而 `UpdateService.check()` 遇到空地址**直接 return null** ——
+> 于是「构建时忘了配地址」不报错也不警告，整个更新检测静默失效，用户永远等不到提示。
+> 现在带了默认兜底，并且有一条回归测试专门盯着这件事。
+
+两个清单源互补：
+
+- **主源 jsDelivr** 国内可直连，但它有 CDN 缓存，发版后可能短时间返回旧清单
+- **备用源 GitHub raw** 没有缓存，但国内时通时断
+
+所以 `UpdateService` 的策略是：主源没给出「有新版」时，再问一次备用源 ——
+正常情况不多花任何请求，缓存导致的漏更新也能被兜住。
+
+发版后如果想让 jsDelivr 立刻更新，可以主动清一次缓存：
+
+```bash
+curl "https://purge.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json"
+```
 
 - 启动 3 秒后静默检查，只有真有新版才弹窗
 - 同一个版本 **24 小时内只提醒一次**

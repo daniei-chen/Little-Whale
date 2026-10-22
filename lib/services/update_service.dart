@@ -77,10 +77,26 @@ class UpdateService {
   /// 检查有没有新版本。没有新版本、没配置地址、网络失败都返回 null ——
   /// **更新检查永远不该打扰用户**，失败就静默跳过。
   Future<UpdateInfo?> check({bool ignoreCooldown = false}) async {
-    if (kUpdateManifestUrl.isEmpty) return null;
+    // 两个地址都没配就直接跳过（从仓库 clone 下来自己构建就是这种情况）
+    if (kUpdateManifestUrl.isEmpty && kUpdateManifestUrlAlt.isEmpty) return null;
 
-    final info = await _fetch(kUpdateManifestUrl) ??
-        await _fetch(kUpdateManifestUrlAlt); // 主节点不通就换备用节点
+    var info = kUpdateManifestUrl.isEmpty
+        ? null
+        : await _fetch(kUpdateManifestUrl);
+
+    // 【为什么主源没给出「有新版」时还要再试备用源】
+    // 主源走 jsDelivr（国内可直连），但它有 CDN 缓存 —— 发版后一段时间里
+    // 可能仍然返回旧清单，表现就是「明明发了新版，App 却说不更新」。
+    // 备用源是 GitHub raw，没有缓存但国内时通时断。两者互补：
+    // 只有主源没给出更新时才多请求一次备用源，正常情况不多花任何请求。
+    if (info == null || info.build <= kAppBuild) {
+      if (kUpdateManifestUrlAlt.isNotEmpty) {
+        final alt = await _fetch(kUpdateManifestUrlAlt);
+        if (alt != null && (info == null || alt.build > info.build)) {
+          info = alt;
+        }
+      }
+    }
     if (info == null) return null;
 
     // 服务器上的构建号比本机大，才算有新版本
