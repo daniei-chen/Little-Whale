@@ -583,13 +583,30 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('开始解析'), findsOneWidget);
   });
-  group('动图保存方式（v0.0.7 从开关改成三档）', () {
-    test('三档都能正确往返 JSON', () {
+  group('动图保存方式（v0.0.8 四档）', () {
+    test('四档都能正确往返 JSON', () {
       for (final m in MotionMode.values) {
         final json =
             jsonDecode(jsonEncode(AppSettings(motionMode: m).toJson())) as Map<String, dynamic>;
         expect(AppSettings.fromJson(json).motionMode, m, reason: '${m.name} 往返后应保持不变');
       }
+    });
+
+    test('动态照片档位：字符串映射与历史别名', () {
+      expect(MotionMode.fromName('livePhoto'), MotionMode.livePhoto);
+      // 'motion' 是早期内部命名，老配置里可能已经写进去了
+      expect(MotionMode.fromName('motion'), MotionMode.livePhoto);
+      expect(MotionMode.livePhoto.storageName, 'livePhoto');
+    });
+
+    test('四档标签互不重复（否则设置页会出现两个同名选项）', () {
+      final labels = MotionMode.values.map((e) => e.label).toSet();
+      expect(labels.length, MotionMode.values.length);
+    });
+
+    test('默认档位仍是短视频，不能因为加了新档就悄悄改默认', () {
+      // 动态照片依赖系统相册支持，当默认会让一部分用户存出来"不会动"
+      expect(const AppSettings().motionMode, MotionMode.video);
     });
 
     test('老版本的 saveLiveAsVideo 字段要能平滑迁移', () {

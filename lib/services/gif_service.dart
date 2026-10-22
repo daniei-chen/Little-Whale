@@ -42,7 +42,7 @@ class GifResult {
 class GifService {
   GifService._();
 
-  static const MethodChannel _ch = MethodChannel('xiaojingyu/gif');
+  static const MethodChannel _ch = MethodChannel('xiaojingyu/media');
 
   /// 目标宽度上限。动图源多为竖屏，400 宽在手机上看够清晰；
   /// 再高 GIF 体积涨得极快（GIF 无帧间压缩）。

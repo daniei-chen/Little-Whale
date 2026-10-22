@@ -413,11 +413,12 @@ class AppState extends ChangeNotifier {
   /// 按当前「动图保存方式」保存单张图。批量保存和单张保存共用这一处，
   /// 避免两条路径的动图逻辑各写一遍、日后改一处漏一处。
   ///
-  /// 三档分流：
-  ///   · 非动图          → 普通下原图
-  ///   · 动图 + video    → 下那段带音轨短视频
-  ///   · 动图 + gif      → 下视频后本地转 GIF（v0.0.7 新增）
-  ///   · 动图 + cover    → 只下静态封面
+  /// 四档分流：
+  ///   · 非动图            → 普通下原图
+  ///   · 动图 + video      → 下那段带音轨短视频
+  ///   · 动图 + livePhoto  → 封面+视频合成动态照片（v0.0.8 新增）
+  ///   · 动图 + gif        → 下视频后本地转 GIF（v0.0.7 新增）
+  ///   · 动图 + cover      → 只下静态封面
   Future<DownloadOutcome> _saveOneImage(
     ResultImage img,
     String referer,
@@ -428,6 +429,20 @@ class AppState extends ChangeNotifier {
 
     if (isLive) {
       switch (settings.motionMode) {
+        case MotionMode.livePhoto:
+          return DownloadService.instance.fetchLiveAsMotionPhoto(
+            coverUrl: img.url,
+            videoUrl: img.videoUrl,
+            referer: referer,
+            fileHint: fileHint,
+            onProgress: onProgress,
+            onComposing: () {
+              // 合成本身很快（字节拼接），但前面下封面+视频已经走了 80% 进度，
+              // 给一句提示让用户知道进入收尾阶段了
+              downloadLabel = '正在合成动态照片…';
+              notifyListeners();
+            },
+          );
         case MotionMode.gif:
           return DownloadService.instance.fetchLiveAsGif(
             videoUrl: img.videoUrl,

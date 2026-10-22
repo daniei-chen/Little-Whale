@@ -742,9 +742,13 @@ class _MinePageState extends State<MinePage> {
     );
     if (picked != null && picked != cur) {
       s.setMotionMode(picked);
-      _toast(picked == MotionMode.gif
-          ? '动图会转成 GIF：无声音、体积约 2~5MB'
-          : '动图将存成${picked.label}');
+      // 三档各有代价，切换时用一句话说清楚，别让用户选完才发现不符预期
+      _toast(switch (picked) {
+        MotionMode.gif => '动图会转成 GIF：无声音、体积约 2~5MB',
+        MotionMode.livePhoto => '动态照片能否播放取决于系统相册，建议先试一张',
+        MotionMode.video => '动图将存成带音轨的短视频',
+        MotionMode.cover => '动图只存第一帧的静态封面',
+      });
     }
   }
 

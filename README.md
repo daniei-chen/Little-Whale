@@ -155,13 +155,45 @@ GenericLocalPlatform(
 }
 ```
 
-**保存方式三选一**（「我的 → 解析偏好 → 动图保存方式」）：
+**保存方式四选一**（「我的 → 解析偏好 → 动图保存方式」）：
 
 | 档位 | 产出 | 特点 |
 |---|---|---|
 | 短视频（默认） | `.mp4` | 保真：动效和声音都在，相册归到「视频」 |
+| **动态照片**（v0.0.8 新增） | `.jpg`（单文件，内嵌原视频） | 相册里是**照片**，长按会动、带原声；**最接近平台原版动图**，但能否播放取决于系统相册 |
 | **GIF 动图**（v0.0.7 新增） | `.gif` | 相册归到「图片」，能当表情直接发微信；**没有声音**、体积约 2~5 MB |
 | 静态封面 | `.jpg` | 只存第一帧，最省空间 |
+
+### 动态照片（Motion Photo）：怎么"复原"动图
+
+动态照片不是新格式，就是把「静态封面」和「带音轨短视频」**重新装进一个文件**：
+
+```
+[ JPEG 图片数据 ... EOI ] [ 直接追加的 MP4 视频（含音轨） ]
+                         ↑
+  由 JPEG 的 APP1 段里一段 XMP 标明「从文件末尾倒数 N 字节开始是视频」
+```
+
+不支持的相册里它就是一张普通 jpg，支持的相册里长按才播放。**不需要抽帧、不需要转码**，
+纯粹是字节拼接，所以体积 ≈ 原视频大小、画质无损、耗时秒级。
+
+原生实现见 `android/app/src/main/kotlin/.../motionphoto/MotionPhotoWriter.kt`，要点：
+
+- **新旧两套 XMP 字段同时写**。Android 动态照片有两套并行标准：
+  - 旧标准 `GCamera:MicroVideo` + `MicroVideoOffset`（MIUI 等）
+  - 新标准 `GCamera:MotionPhoto` + `Container:Directory`（三星、Pixel、HyperOS 3 起）
+  两套语义重叠、互不冲突，一起写能最大化命中率。
+- **XMP 插在 SOI + 可能的 JFIF APP0 之后**。JFIF 规范要求 APP0 紧跟 SOI，
+  虽然多数解析器容忍 XMP 插在前面，但没必要冒险。
+- **封面不是 JPEG 时自动重编码**（平台常给 webp/heic）。XMP 里声明的
+  `Item:Mime` 是 `image/jpeg`，容器里就必须真的是 JPEG。
+- `MicroVideoOffset` 与 `Container:Item[2]:Length` 都填**视频字节数** ——
+  因为视频追加在末尾，从末尾倒数这么多字节正好是它的起点。
+
+> **兼容性必须说清楚**：这是四档里**最依赖机型**的一档。据公开实测，
+> 小米 HyperOS 3 用标准 XMP 就能识别第三方生成的动态照片；更老的 MIUI 和
+> 其他品牌可能需要厂商私有元数据，可能只显示静态封面（不会坏，只是不动）。
+> 所以默认档位仍是「短视频」，动态照片需要自己去设置里选，选完先试一张。
 
 GIF 是**本地合成**的，三道工序都在手机上完成：
 
@@ -400,22 +432,24 @@ lib/
 │   ├── kuaishou.dart          快手
 │   └── zhihu.dart             知乎
 ├── services/
-│   ├── download_service.dart  下载：断点续传、按文件头定后缀、动图转 GIF
+│   ├── download_service.dart  下载：断点续传、按文件头定后缀、动图转 GIF/动态照片
 │   ├── gif_service.dart       动图视频 → GIF（走原生通道，纯本地）
+│   ├── motion_photo_service.dart  封面+视频 → 动态照片（走原生通道，纯本地）
 │   ├── update_service.dart    检查更新（只提示 + 开浏览器，不下载安装包）
 │   └── crash_log.dart         本地错误日志
 ├── models/
 │   ├── parse_result.dart      解析结果模型
-│   └── motion_mode.dart       动图保存方式三档（短视频 / GIF / 静态封面）
+│   └── motion_mode.dart       动图保存方式四档（短视频/动态照片/GIF/静态封面）
 ├── widgets/
 │   ├── net_image.dart         带 Referer 的图片（列表一律用它）
 │   └── image_viewer.dart      全屏预览
 ├── pages/                     首页 / 记录 / 我的
 └── state/app_state.dart       全局状态
 
-android/app/src/main/kotlin/.../MainActivity.kt   动图转 GIF 的 MethodChannel
+android/app/src/main/kotlin/.../MainActivity.kt   媒体转换的 MethodChannel
 android/app/src/main/kotlin/.../gif/VideoToGif.kt 抽帧 + 缩放（OPTION_CLOSEST）
 android/app/src/main/java/.../gif/                内置 GIF 编码器（纯 Java，源自 Glide）
+android/app/src/main/kotlin/.../motionphoto/      动态照片封装（XMP 注入 + MP4 追加）
 server/version.json                                更新清单（备用副本）
 tools/
 ├── build.ps1                                        构建（只出 arm64-v8a）

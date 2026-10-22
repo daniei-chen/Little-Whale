@@ -7,6 +7,7 @@ import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'gif_service.dart';
+import 'motion_photo_service.dart';
 
 /// 一次下载的结果
 class DownloadOutcome {
@@ -229,6 +230,100 @@ class DownloadService {
       try {
         if (gif != null && await gif.exists()) await gif.delete();
       } catch (_) {}
+    }
+  }
+
+  /// 保存动图为 **动态照片（Motion Photo）**（v0.0.8 新增）。
+  ///
+  /// 这是最接近「复原平台原版动图」的形态：产出一个 `.jpg`，里面同捆着
+  /// 静态封面和那段带音轨的短视频。相册里它是照片，长按/点开才播放。
+  ///
+  /// 【为什么要下载两份东西】
+  /// 动态照片的容器里必须同时有「主图」和「视频」两段数据。平台把这两者
+  /// 作为两个独立 URL 给我们，所以封面和视频都要下 —— 比 GIF 多一次网络请求，
+  /// 但省掉了抽帧与 256 色量化，整体反而更快（合成只是字节拼接）。
+  ///
+  /// 【进度怎么算】封面 0~40%、视频 40~80%、合成 80~100%，
+  /// 让进度条在三段之间平滑走完，不会中途卡住。
+  Future<DownloadOutcome> fetchLiveAsMotionPhoto({
+    required String coverUrl,
+    required String videoUrl,
+    required String referer,
+    String album = '小鲸鱼',
+    String? fileHint,
+    void Function(double progress)? onProgress,
+    VoidCallback? onComposing,
+  }) async {
+    if (coverUrl.isEmpty || videoUrl.isEmpty) {
+      return const DownloadOutcome(saved: false, message: '动图地址不完整');
+    }
+
+    File? cover;
+    File? video;
+    File? out;
+    try {
+      final hint = _safeFileName(fileHint ?? 'live');
+
+      // 1) 主图（封面）—— 上相册后就是那张「照片」
+      cover = await _download(
+        coverUrl,
+        referer,
+        '${hint}_cover',
+        '',
+        false,
+        (p) => onProgress?.call(p * 0.4),
+      );
+
+      // 2) 内嵌视频（含音轨）
+      video = await _download(
+        videoUrl,
+        referer,
+        '${hint}_video',
+        '',
+        true,
+        (p) => onProgress?.call(0.4 + p * 0.4),
+      );
+
+      // 3) 合成 —— 原生侧做 JPEG/XMP 注入 + MP4 追加
+      onComposing?.call();
+      final dir = await getTemporaryDirectory();
+      // 扩展名必须是 .jpg：相册/MediaStore 是按扩展名归类成「照片」的
+      final outPath = '${dir.path}/${hint}_live.jpg';
+      final res = await MotionPhotoService.make(
+        coverPath: cover.path,
+        videoPath: video.path,
+        outPath: outPath,
+      );
+      if (!res.ok) {
+        return DownloadOutcome(
+          saved: false,
+          message:
+              res.message.isEmpty ? '合成动态照片失败' : '合成动态照片失败（${res.message}）',
+        );
+      }
+      out = File(outPath);
+      if (!await out.exists() || await out.length() <= 0) {
+        return const DownloadOutcome(saved: false, message: '合成的动态照片是空的');
+      }
+
+      // 4) 存相册 —— .jpg 走 IMAGE_URI，系统扫描后才可能标成动态照片
+      await Gal.putImage(out.path, album: album);
+      onProgress?.call(1);
+      return DownloadOutcome(
+        saved: true,
+        message: '已存为动态照片（${res.mb.toStringAsFixed(1)} MB）',
+      );
+    } on GalException catch (e) {
+      return DownloadOutcome(saved: false, message: _galMessage(e));
+    } catch (e) {
+      return DownloadOutcome(saved: false, message: '保存动态照片失败：$e');
+    } finally {
+      // 三个临时文件都清掉；相册里已经有副本了
+      for (final f in [cover, video, out]) {
+        try {
+          if (f != null && await f.exists()) await f.delete();
+        } catch (_) {}
+      }
     }
   }
 
