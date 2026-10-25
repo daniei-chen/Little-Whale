@@ -4,6 +4,8 @@
 >
 > **对象**：被 MIUI 安全中心报为 `【高风险】包含病毒：a.gray.BulimiaTGen.f` 的安装包。
 >
+> **2026-10-25 增补**：整改后的 v0.0.8 在用户设备上被同一规则再次报出（本文首发的 v0.0.5 申诉结论继续有效）。本文新增「[当前被报样本](#当前被报样本2026-10-25-增补)」一节，给出 v0.0.8（被报样本）与 v0.0.9（现行最新版）的实测取证数据，申诉时请引用这一节。
+>
 > **声明**：本文所有技术结论均来自对已发布 APK 的实际静态取证，命令见文末「附：自查用的命令」，可逐条复现。凡未实测的字段一律标注为占位符，不填写推测值。
 
 ---
@@ -49,6 +51,38 @@
 
 > 指纹实测来源：`apksigner verify --print-certs xiaojingyu-0.0.6-arm64-v8a.apk`。
 > **签名世代说明**：v0.0.6 起启用新的发布证书（原证书私钥已不可用，无法继续签发新版本）。上表指纹属于**当前证书**，即 v0.0.6 及以后各版本；v0.0.5 及更早版本由上一代证书签发，其指纹与上表不同——那是同一开发者的历史版本，不是他人仿冒。
+
+---
+
+<a id="当前被报样本2026-10-25-增补"></a>
+
+## 当前被报样本（2026-10-25 增补）
+
+v0.0.6 整改后，用户设备上的 **v0.0.8** 仍被同一规则 `a.gray.BulimiaTGen.f` 报出。下表是被报样本与现行最新版的对照数据，均可逐条复现（命令见文末附录）：
+
+| 项目 | v0.0.8（本次被报样本） | v0.0.9（现行最新版，已实测） |
+|---|---|---|
+| versionCode / versionName | 8 / 0.0.8 | 9 / 0.0.9 |
+| APK 文件名 | `xiaojingyu-0.0.8-arm64-v8a.apk` | `xiaojingyu-0.0.9-arm64-v8a.apk` |
+| APK SHA-256 | `253E11E8BCA65904B2436B76C680A4DB344CEF34AC69139D8514F16A6FDDBF46`（发布于 Release v0.0.8 说明） | `FEE113769F958A9AB66200E3D723E56536F3CCE6902F662A8A535B33C0C61FA3`（2026-10-25 实算，与 Release 说明一致） |
+| 签名证书 | 与 v0.0.6 起同一张：SHA-256 `f2c266e8fc8bacdc7aaab93eb14638222d2f2f95d03d174fe503b49c55823827` | 同左（`apksigner verify --print-certs` 实测一致） |
+| 签名方案 | v2 + v3 | v2 + v3（实测 `Verified using v2 scheme: true` / `v3: true` / `v1: false`） |
+| 声明权限 | 同 v0.0.6 最小集（见下） | 实测：`INTERNET`、`ACCESS_NETWORK_STATE`、`WRITE_EXTERNAL_STORAGE`（maxSdk 29）+ 1 条 androidx.core 自动注入的自定义签名级权限；`aapt2 dump badging` 另列一条**由 WRITE 推导的隐含** `READ_EXTERNAL_STORAGE`（maxSdk 29），非声明权限 |
+| native-code | `arm64-v8a` | `arm64-v8a`（实测） |
+| `debuggable` / kernel_blob | 未声明 / 无（release AOT） | 同左（实测 `assets/flutter_assets/` 下无 `kernel_blob.bin`） |
+
+### v0.0.9 实测取证（2026-10-25，`aapt2` 36.0.0 + `apksigner`）
+
+| 取证项 | 结果 |
+|---|---|
+| `DexClassLoader` / `PathClassLoader` / `InMemoryDexClassLoader` / `ProcessBuilder` / `dalvik/system/*` | **0 命中** |
+| 广告 / 统计 / 加固 SDK（umeng、gdt、bytedance/pangle、sigmob、mintegral、appsflyer、bugly、jiagu 等） | **0 命中** |
+| `lib/arm64-v8a/` 清单 | `libflutter.so`、`libapp.so`、`libdatastore_shared_counter.so`（共 3 个） |
+| 声明 `REQUEST_INSTALL_PACKAGES` | 无（v0.0.6 已删除，此后未恢复） |
+
+### 关于 `libdatastore_shared_counter.so` 的说明（与 v0.0.6 取证表的差异）
+
+v0.0.6 取证时该文件不存在；v0.0.9 中重新出现。原因：`shared_preferences_android` 自 2.4.x 起把内部实现迁移到了 androidx **DataStore**（构建脚本 `implementation("androidx.datastore:datastore:1.1.7")`），随 `shared_preferences` 2.5.x 传递引入。这是 Google 官方 androidx 组件、海量主流应用的标配依赖，**与 v0.0.6 移除的「通用 JNI 反射桥」（`com/github/dart_lang/jni` + `libdartjni.so`）不是同一类东西**——后者提供「加载任意类、调用任意方法」的反射能力，前者只是键值存储实现，不新增任何可疑能力。特此说明以免复核时对不上。
 
 ---
 
@@ -203,6 +237,8 @@ REQUEST_INSTALL_PACKAGES 权限
 | 完整源码 | <https://github.com/daniei-chen/Little-Whale> |
 | 发布页（含每个 APK） | <https://github.com/daniei-chen/Little-Whale/releases> |
 | 本次被报样本 | Release `v0.0.5` 附件 `xiaojingyu-0.0.5-arm64-v8a.apk`，SHA-256 见上文基本信息表 |
+| 2026-10 被报样本 | Release `v0.0.8` 附件 `xiaojingyu-0.0.8-arm64-v8a.apk`，SHA-256 见「当前被报样本」一节 |
+| 现行最新版（建议复核样本） | Release `v0.0.9` 附件 `xiaojingyu-0.0.9-arm64-v8a.apk`，SHA-256 `FEE113769F958A9AB66200E3D723E56536F3CCE6902F662A8A535B33C0C61FA3`，取证数据见「当前被报样本」一节 |
 | 本次整改版本 | Release `v0.0.6` 附件 `xiaojingyu-0.0.6-arm64-v8a.apk`，SHA-256 见上文基本信息表（以 Release 页面最终上传件为准） |
 | ABI 清单 | `aapt2 dump badging` 的 `native-code` 行：v0.0.6 应为 `'arm64-v8a'`（v0.0.5 曾声称三 ABI） |
 | 签名变更记录 | Release `v0.0.6` 说明中的「请先卸载旧版」提示，与本文「签名变更与升级须知」一致 |
