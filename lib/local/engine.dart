@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -149,11 +150,28 @@ class LocalEngine {
   /// WebView 与桌面 Chrome 的特征差异主要在：`window.chrome` 对象、
   /// plugins/mimeTypes 列表、`navigator.userAgentData`、屏幕与窗口尺寸。
   /// 这里把这些补齐成「桌面 Windows Chrome」的样子，和 UA 保持一致。
+  ///
+  /// 【v0.1.0 修正：指纹必须跟着 UA 走】
+  /// 之前不管 UA 是桌面还是手机，都装桌面指纹。抖音的视频解析走的是
+  /// **手机 UA + 手机分享页**，于是页面里出现「手机 UA + 桌面屏幕尺寸 +
+  /// 桌面 PDF 插件 + maxTouchPoints=0」这种自相矛盾的组合 ——
+  /// 这本身就是最典型的风控特征，被降级成空页面完全说得通。
+  /// 现在按 [setUserAgent] 记录的形态选脚本。
   Future<void> _installStealth() async {
     try {
-      await _controller?.runJavaScript(_stealthScript);
+      // 切换指纹形态时先清掉对方的幂等标记，否则「桌面装过 → 切手机」这段
+      // 会被对方的 `if (window.__fsStealth) return` 挡掉，留下矛盾的残留特征。
+      await _controller?.runJavaScript(_mobileFingerprint
+          ? 'window.__fsStealth = undefined;$_stealthMobileScript'
+          : 'window.__fsStealthMobile = undefined;$_stealthScript');
     } catch (_) {}
   }
+
+  /// 当前是否处于「手机指纹」模式（由 [setUserAgent] 自动判断）
+  bool _mobileFingerprint = false;
+
+  /// 供平台适配器查询：当前是否手机形态
+  bool get isMobileFingerprint => _mobileFingerprint;
 
   /// 加载后密集补装几次（钩子 + 伪装）。
   ///
@@ -351,6 +369,7 @@ class LocalEngine {
   /// 判据：导航前在当前文档打一个标记，新文档里这个标记自然就没了。
   /// 等它消失 = 文档确实被替换了。比猜等待时间可靠得多。
   Future<void> _navigate(WebViewController c, String pageUrl, Duration settle) async {
+    final t0 = DateTime.now();
     try {
       await c.runJavaScript('window.__fsPreNav = 1;');
     } catch (_) {
@@ -374,6 +393,10 @@ class LocalEngine {
 
     // 再给页面一点渲染时间（DOM 就绪但数据还没填进去）
     await Future.delayed(settle);
+    if (kDebugMode) {
+      debugPrint('[LocalEngine] 导航+静置 ${DateTime.now().difference(t0).inMilliseconds}ms '
+          '（settle=${settle.inMilliseconds}ms）');
+    }
   }
 
   Future<dynamic> evaluatePolling(
@@ -565,6 +588,66 @@ class LocalEngine {
 })();
 ''';
 
+  /// 手机形态的特征伪装（v0.1.0 新增）。
+  ///
+  /// 和 [_stealthScript] 恰好相反：要补齐的是「一台真实手机」的特征 ——
+  /// 触摸点、手机屏幕尺寸、UA-CH 的 `mobile: true`，以及**没有**桌面 PDF 插件。
+  ///
+  /// 【为什么这个很重要】抖音的视频解析走 **手机 UA + 手机分享页**。
+  /// 如果这时候页面里报的是「桌面 1440×900、5 个 PDF 插件、maxTouchPoints=0」，
+  /// 那就是一眼假的风控特征。旧实现正是如此 —— 这很可能就是
+  /// 「视频有时能解析、有时页面一片空白」的根因之一。
+  static const String _stealthMobileScript = r'''
+(function () {
+  if (window.__fsStealthMobile) return;
+  window.__fsStealthMobile = true;
+
+  function def(obj, prop, getter) {
+    try { Object.defineProperty(obj, prop, { get: getter, configurable: true }); } catch (e) {}
+  }
+
+  def(navigator, 'webdriver', function () { return undefined; });
+  def(navigator, 'languages', function () { return ['zh-CN', 'zh', 'en']; });
+  def(navigator, 'maxTouchPoints', function () { return 5; });
+  def(navigator, 'hardwareConcurrency', function () { return 8; });
+  def(navigator, 'deviceMemory', function () { return 4; });
+
+  // 手机 Chrome 也有 window.chrome 对象，但没有那几个 PDF 插件
+  if (!window.chrome) { try { window.chrome = {}; } catch (e) {} }
+
+  try {
+    var brands = [
+      { brand: 'Not_A Brand', version: '8' },
+      { brand: 'Chromium', version: '131' },
+      { brand: 'Google Chrome', version: '131' }
+    ];
+    var uaData = {
+      brands: brands,
+      mobile: true,
+      platform: 'Android',
+      getHighEntropyValues: function () {
+        return Promise.resolve({
+          architecture: '', bitness: '', brands: brands, mobile: true,
+          model: 'Pixel 7', platform: 'Android', platformVersion: '14.0.0',
+          uaFullVersion: '131.0.0.0', fullVersionList: brands, wow64: false
+        });
+      },
+      toJSON: function () { return { brands: brands, mobile: true, platform: 'Android' }; }
+    };
+    def(navigator, 'userAgentData', function () { return uaData; });
+  } catch (e) {}
+
+  def(window, 'outerWidth', function () { return 390; });
+  def(window, 'outerHeight', function () { return 844; });
+  def(screen, 'width', function () { return 390; });
+  def(screen, 'height', function () { return 844; });
+  def(screen, 'availWidth', function () { return 390; });
+  def(screen, 'availHeight', function () { return 844; });
+  def(screen, 'colorDepth', function () { return 24; });
+  def(screen, 'pixelDepth', function () { return 24; });
+})();
+''';
+
   /// 同时钩住 fetch 与 XMLHttpRequest。
   ///
   /// 为什么两个都要钩：各平台实现不一样 —— 抖音的详情接口走 XHR，
@@ -668,10 +751,23 @@ class LocalEngine {
   ///
   /// 有些平台手机站和 PC 站是两套完全不同的实现，需要分别试。
   /// 用完记得切回 [desktopChromeUa]，否则会污染后续解析。
+  ///
+  /// 【v0.1.0】切换 UA 的同时**同步切换指纹形态** —— 两者必须一致，
+  /// 详见 [_installStealth] 的说明。切换后立刻重装一次伪装脚本，让当前
+  /// 文档马上生效（不用等下一次导航）。
   Future<void> setUserAgent(String ua) async {
     try {
+      final mobile = _looksMobile(ua);
+      final changed = mobile != _mobileFingerprint;
+      _mobileFingerprint = mobile;
       await _controller?.setUserAgent(ua);
+      if (changed) await _installStealth();
     } catch (_) {}
+  }
+
+  static bool _looksMobile(String ua) {
+    final s = ua.toLowerCase();
+    return s.contains('mobile') || s.contains('iphone') || s.contains('android');
   }
 
   /// 引擎默认的桌面 Chrome UA

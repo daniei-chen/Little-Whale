@@ -14,6 +14,23 @@ analyzer:
     - build/**
     - android/**
 
+  errors:
+    # ---------------------------------------------------------------------
+    # Flutter 3.47 起把 `package:flutter/material.dart` 标记为废弃，
+    # 建议迁到 `package:material_ui/material_ui.dart`。
+    #
+    # 【为什么这里先忽略，而不是马上全量迁移】
+    # 1. 这条迁移要求**整个依赖树**（包括所有插件）都跟着换，现在生态还没铺开；
+    #    只在 app 侧单方面改 import 会引入两套 Material 类型不互通的问题。
+    # 2. 它是 info 级诊断，不影响运行；但 `flutter analyze` 会因此返回非零退出码，
+    #    直接卡死发版脚本（tools/release.ps1 里 analyze 不过就拒绝发版）。
+    # 3. 这里显式忽略，是为了让「analyze 通过」重新等价于「没有真问题」——
+    #    否则 20 条重复的 info 会把真正的 error/warning 淹没。
+    #
+    # 迁移完成（material_ui 生态可用）后，把这条删掉，一次性改 import。
+    # ---------------------------------------------------------------------
+    deprecated_member_use: ignore
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

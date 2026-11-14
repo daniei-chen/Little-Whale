@@ -94,17 +94,17 @@ if ($cfg.DownloadPage) { $defines += "--dart-define=DOWNLOAD_PAGE=$($cfg.Downloa
 if ($defines.Count -gt 0) { Ok "注入了 $($defines.Count) 个 --dart-define" } else { Warn '没有注入地址，App 不带更新检查' }
 
 Remove-Item 'build\app\intermediates\flutter' -Recurse -Force -ErrorAction SilentlyContinue
-flutter build apk --release --split-per-abi @defines | Out-Null
+flutter build apk --release --target-platform android-arm64 @defines | Out-Null
 if ($LASTEXITCODE -ne 0) { throw '构建失败' }
 
 $apkDir = Join-Path $Root 'build\app\outputs\flutter-apk'
-Get-ChildItem $apkDir -Filter 'app-*-release.apk' | ForEach-Object {
+Get-ChildItem $apkDir -Filter '*.apk' | ForEach-Object {
   Ok "$($_.Name)  $([math]::Round($_.Length/1MB,1)) MB"
 }
 
 # ---------------------------------------------------------------- 5. 部署
 $apkName = "xiaojingyu-$newVer-arm64-v8a.apk"
-$apkPath = Join-Path $apkDir 'app-arm64-v8a-release.apk'
+$apkPath = Join-Path $apkDir 'app-release.apk'
 
 if ($SkipDeploy -or -not $cfg.ServerHost -or -not $cfg.ServerDir) {
   Say '跳过服务器部署'

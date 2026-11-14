@@ -67,7 +67,7 @@
 
 | 平台 | 视频 | 图文 | 动图 | 实现方式 |
 |:---:|:---:|:---:|:---:|---|
-| **抖音** | ✅ | ✅ | ✅ | 视频走**手机分享页**取 `<video>` 直链；图文/动图从页面数据流 `__pace_f` 提取 |
+| **抖音** | ✅ | ✅ | ✅ | **三入口自动降级**（手机分享页 / 分享域 / PC 作品页）× **四数据源合并**（`_ROUTER_DATA`、`__pace_f`、DOM、页面计数），播放地址逐个**真实探测**后才交给下载器 |
 | **小红书** | ✅ | ✅ | ✅ | 抓页面解析内嵌数据；图片换公开 CDN 节点去水印；动图取 `stream.h264` |
 | **哔哩哔哩** | ✅ | ✅ | — | 视频走公开 API + wbi 签名；图文走专栏接口与图文动态（opus） |
 | **微博** | ✅ | ✅ | ⚠️ | 借内置 WebView 的 Cookie 调接口；动图做了字段探测，未拿到实例验证 |
@@ -125,7 +125,7 @@ GenericLocalPlatform(
 | 平台 | 水印 / 压缩从哪来 | 怎么去掉 |
 |---|---|---|
 | 小红书 | 图片地址末尾的 `!h5_1080jpg` 处理模板 | 去掉模板 + 换到公开 CDN 节点（31 KB 带水印 → 62 KB 原图） |
-| 抖音 | `playwm`（带水印）vs `play`（无水印） | 换路径**并换域名**（`m.douyin.com` 上没有 `play` 口子） |
+| 抖音 | `playwm`（带水印）vs `play`（无水印） | 拿 `play_addr.uri` 拼无水印接口（`aweme.snssdk.com` / `www.douyin.com` 两条，1080P 优先），**逐个取一段字节验证**；带水印地址只作最后兜底 |
 | 微博 | 接口返回的 `large.url` 其实是 `/mw2000/` 压缩版 | 换成 `/large/`（1.2 MB → 2.4 MB） |
 | B站图片 | 图床地址带 `@1080w.webp` 这类处理后缀 | 去掉 `@` 之后的部分即为原图 |
 | B站视频 | **平台自带水印，无法去除** | — |
@@ -361,7 +361,8 @@ Release 附件走的 `objects.githubusercontent.com` 国内也基本连不上。
 |---|---|---|
 | v0.0.1 ~ v0.0.3 | Android 调试证书（`CN=Android Debug`） | 被安全中心判高风险，必须换 |
 | v0.0.5 | 正式证书（私钥已丢失） | 曾以为换签名就能解决报毒 —— **这个判断是错的**，一个月后病毒库更新，同一规则再次命中 |
-| v0.0.6 起 | 上表的新证书 | 原私钥已无法找回，只能重新生成 |
+| v0.0.6 ~ v0.0.9 | 上表的新证书 | 原私钥已无法找回，只能重新生成 |
+| v0.1.0 | Android 调试证书（`029ce0db…`） | **仓库里没有发布密钥**（`android/keystore/*.jks` 被 `.gitignore` 排除，本地也没有），这一版由本地构建产出，无法延续 v0.0.9 的签名。**从旧版升级必须先卸载** |
 
 > ⚠️ **三条必须记住的事**
 >
@@ -492,14 +493,34 @@ docs/                                                README 用的图标与截�
 另外必须用**手机 UA**，桌面 UA 会被直接推到登录页。
 
 **抖音视频要换入口** —— PC 页面上详情接口会被取消、拿不到数据。
-换成**手机 UA** 打开同一链接，会跳到 `m.douyin.com/share/video/{id}`，
-那里 `<video>` 标签直接挂着可下载的 mp4，而且 `playwm` 换成 `play` 就是无水印版。
+换成**手机 UA** 打开同一链接，会跳到 `m.douyin.com/share/video/{id}?share_sign=…`。
+注意**直接**访问 `m.douyin.com/share/video/{id}`（不带 share 参数）会得到「抱歉出错了」，
+必须让 `www.douyin.com/video/{id}` 自己 302 过去。
+
+**抖音分享页的 SSR 是空壳，但渲染后有 `_ROUTER_DATA`** —— 直接 HTTP 抓页面只能拿到
+一个 layout 配置（实测 32KB，无 `videoInfoRes`）。页面自己的 JS 跑完后，
+`window._ROUTER_DATA.loaderData["video_(id)/page"].videoInfoRes.item_list[0]`
+里才是完整作品对象（desc / author.nickname / video.play_addr / cover / create_time / duration）。
+这比等 `<video>` 挂载可靠得多 —— 而且 `play_addr.uri` 直接就是无水印接口的 `video_id`。
 
 **抖音图文不能用 DOM 抠** —— 轮播是懒加载的，而且**动图的视频地址根本不在 DOM 里**。
 要读页面的 `__pace_f`（RSC 数据流），一次就带完整的 `images` 数组。
 
+**`__pace_f` 里的字段名是驼峰，接口里是下划线** —— 动图的视频地址在
+`video.playAddr`（**驼峰**），不是 `play_addr`。实测一份动图作品的 pace 里
+`play_addr` 出现 **0** 次、`playAddr` 出现 3 次 —— 只认下划线就一张动图都拿不到。
+
+**`__pace_f` 里混着推荐流的作品** —— 实测一页里有 68 个 `"desc"`、19 个 `"nickname"`，
+全文取第一个会拿到**别人的标题**。标题优先用 `document.title`，作者优先用
+`ownerNickname`，其次才在目标 `images` 数组附近 ±4000 字符内找。
+
 **抖音视频封面不能只取 `<video>.poster`** —— 手机分享页上那个属性是空的，
-表现为「只有播放按钮、没有封面」。要按 `og:image → poster → 页面大图` 三级兜底。
+表现为「只有播放按钮、没有封面」。要按 `og:image → video.cover → 首图` 三级兜底。
+（`_ROUTER_DATA` 里的封面也挂在 **`video.cover`** 下面，顶层没有。）
+
+**UA 和浏览器指纹必须一致** —— 手机 UA 配桌面指纹（1440×900、5 个 PDF 插件、
+`maxTouchPoints=0`）是最典型的风控特征。抖音视频走手机 UA、图文走桌面 UA，
+两者切换时指纹必须跟着换，否则页面会被降级成空壳。
 
 **快手的 `playAddr` 是数组** —— 字段名是 `src` 不是 `urlList`。
 一开始按对象处理，结果明明数据就在眼前却永远是 0 条。

@@ -72,3 +72,8 @@ Thumbs.db
 
 # 本地构建配置：里面是真实服务器地址，不能进公开仓库
 tools/build.config.ps1
+
+# AGP 会在 android/build 下写报告，属于产物，不进版本库
+android/build/
+# Kotlin 编译产物（AGP 9 / KGP 新版本的默认输出目录）
+android/.kotlin/

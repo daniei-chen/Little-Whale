@@ -32,6 +32,13 @@ val keystoreProps = Properties().apply {
     }
 }
 
+/// 本地集成测试是否要带上 x86_64 库。
+///
+/// 真机/发布只需要 arm64；模拟器只有 x86_64，装 arm64 包会 UnsatisfiedLinkError。
+/// 用环境变量而不是命令行参数，是因为 `flutter build apk` 不会把 -P 透传给
+/// Gradle（它自己起 Gradle 进程），而环境变量一定会被继承。
+val keepTestAbis = System.getenv("FLUTTER_TEST_X64") == "1"
+
 android {
     namespace = "cn.flashsave.flashsave"
     compileSdk = flutter.compileSdkVersion
@@ -72,17 +79,35 @@ android {
         //
         // 以后要发 32 位包：调整下面的 excludes，并用
         // `--target-platform android-arm` 构建，两者要对齐。
+        //
+        // 【v0.1.0 新增】本地在 x86_64 模拟器上跑集成测试时，用环境变量
+        // FLUTTER_TEST_X64=1 关掉 x86_64 的排除 —— 否则模拟器装上就
+        // UnsatisfiedLinkError（它只有 x86_64 的 libflutter.so）。
+        // 发布流程不设这个变量，产物仍然是纯 arm64。
         packaging {
             jniLibs {
-                excludes += setOf("lib/armeabi-v7a/**", "lib/x86_64/**")
+                excludes += if (keepTestAbis) {
+                    setOf("lib/armeabi-v7a/**")
+                } else {
+                    setOf("lib/armeabi-v7a/**", "lib/x86_64/**")
+                }
             }
         }
 
         // 保留 abiFilters 作为"意图声明"：告诉 AGP 我们只要 arm64。
         // 它对 externalNativeBuild（CMake/ndk-build）有效，对 AAR 的
         // 预编译库无效 —— 所以真正的过滤靠上面的 packaging.excludes。
-        ndk {
-            abiFilters += listOf("arm64-v8a")
+        //
+        // 【v0.1.0】发布构建**不再**设置 abiFilters：
+        // AGP 9.1.1 起，`ndk { abiFilters }` 与 `flutter build apk --split-per-abi`
+        // 的 splits 冲突，直接报
+        //   "arm64-v8a in ndk abiFilters cannot be present when splits abi filters are set"
+        // 而本来真正生效的就是 packaging.excludes，这里设了反而是噪音。
+        // 只有本地跑模拟器集成测试（FLUTTER_TEST_X64=1）时才设，那种场景不用 splits。
+        if (keepTestAbis) {
+            ndk {
+                abiFilters += listOf("arm64-v8a", "x86_64")
+            }
         }
     }
 

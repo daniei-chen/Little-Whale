@@ -2,7 +2,7 @@ name: flashsave
 description: "小鲸鱼 —— 多平台视频/图文链接解析与保存工具，本地解析、保存无水印原片"
 publish_to: 'none'
 
-version: 0.0.9+9
+version: 0.1.0+10
 
 environment:
   sdk: ^3.13.3
@@ -67,6 +67,21 @@ dev_dependencies:
 # 不带 jni。等哪天 path_provider 上游能按需裁剪，再把这段删掉。
 dependency_overrides:
   path_provider_android: 2.2.21
+
+  # 【同一个理由：把 shared_preferences_android 钉在 2.4.28】
+  #
+  # 从 2.5.0 起，它改用 dart_lang/jni 实现，于是 APK 里会多出：
+  #   · com.github.dart_lang.jni.JniPlugin —— 一个能加载任意 Java 类、
+  #     调用任意静态/实例方法的通用 JNI 反射桥
+  #   · lib/<abi>/libdartjni.so、libdatastore_shared_counter.so
+  #
+  # 小鲸鱼只用 SharedPreferences 最基础的一套 API（读写几个字符串/布尔），
+  # 完全用不到 JNI。而「Flutter 应用 + 通用 JNI 反射桥 + 混淆后的 libapp.so」
+  # 在静态扫描眼里是典型的可疑组合，会给 a.gray.* 的启发式判定加分 ——
+  # 这正是 path_provider_android 上面那条 override 的由来，现在是同一件事。
+  #
+  # 2.4.28 是最后一个纯原生实现（Kotlin）的版本。等上游能按需裁剪再删掉。
+  shared_preferences_android: 2.4.28
 
 flutter:
   uses-material-design: true

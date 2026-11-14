@@ -1,16 +1,43 @@
-import 'package:dio/dio.dart';
+import 'dart:async';
 
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+
+import 'douyin_parse.dart';
 import 'engine.dart';
 import 'types.dart';
 
-/// 抖音 · 本地解析
+/// 抖音 · 本地解析（v0.1.0 重写）
 ///
-/// 逻辑基本是把服务端 `03-后端服务/src/adapters/douyin.js` 搬过来，
-/// 只把「playwright 开浏览器」换成「App 内置 WebView」：
+/// ## 这一版解决的是什么
 ///
-/// · **视频**：打开 `/video/{id}`，拦截页面自己发的 `/aweme/v1/web/aweme/detail/`
-/// · **图文**：打开 `/note/{id}`，从 DOM 抠图
-///   （图文页面**不发** detail 接口 —— 服务端那边实测确认过，别再踩）
+/// 旧实现有两条硬依赖，任何一条不成立就整条链接解析失败：
+///   · 视频只读页面上的 `<video>` 元素
+///   · 图文只读 `__pace_f` 里 `"images":[{"width"` 这一种写死的形态
+///
+/// 而抖音最近两次改版恰好把这两处都动了：
+///   · 分享页渲染后的**完整作品数据回到了 `window._ROUTER_DATA` 里**
+///     （`loaderData["video_(id)/page"].videoInfoRes.item_list[0]`），
+///     比 `<video>` 稳得多 —— 不用等播放器挂载，还能一次拿到标题/作者/时长/封面；
+///   · `__pace_f` 里的 `images` 字段顺序不再固定，只认一种前缀必然漏。
+///
+/// 现在的策略是**多入口 + 多数据源 + 真探测**：
+///
+/// ```
+/// 链接归一化 ──► 入口候选（手机分享页 / PC 作品页 / 分享域）
+///                     │
+///                     ├─ 一次导航，同一份探针脚本同时取回四类数据：
+///                     │     _ROUTER_DATA · __pace_f(images/play_addr) · DOM · 页面计数
+///                     │
+///                     ├─ 纯 Dart 的 DouyinParser 统一解析（有真实数据单测）
+///                     │
+///                     └─ 媒体地址**真探测**：Range 请求 + ftyp 头校验，
+///                        候选地址逐个试，用第一个真能取到字节的
+/// ```
+///
+/// 关键取舍：**宁可多花一次 Range 请求，也不要把一个取不到的地址交给下载器。**
+/// 「解析成功、保存失败」对用户的伤害比「解析失败」大得多 —— 前者会让人以为
+/// 文件已经在手机里了。
 class DouyinLocalPlatform extends LocalPlatform {
   @override
   String get key => 'douyin';
@@ -19,573 +46,880 @@ class DouyinLocalPlatform extends LocalPlatform {
   String get name => '抖音';
 
   @override
-  List<String> get hosts => const ['douyin.com', 'iesdouyin.com'];
+  List<String> get hosts => const [
+        'douyin.com',
+        'iesdouyin.com',
+        'douyinpic.com',
+      ];
 
   @override
   String get referer => 'https://www.douyin.com/';
 
-  static final _idInPath = RegExp(r'/(?:video|note|share/video|share/note)/(\d{15,25})');
-  static final _idInText = RegExp(r'(\d{15,25})');
+  /* ------------------------------------------------------------------ */
+  /* UA 常量                                                             */
+  /* ------------------------------------------------------------------ */
 
-  /// 短链还原专用的 Dio —— 复用连接，别每次都 new 一个
-  static final Dio _shortLinkDio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 6),
-    receiveTimeout: const Duration(seconds: 8),
+  /// iPhone Safari —— 抖音对它给的是**真正的手机分享页**（带完整 `_ROUTER_DATA`）
+  static const String _uaIphone =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
+  /// Android Chrome —— 少数情况下 iPhone UA 被拦时的备选
+  static const String _uaAndroid =
+      'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+
+  /// 桌面 Chrome —— **图文页必须用它**（手机 UA 会被跳到分享页，那套不发图文数据）
+  static String get _uaDesktop => LocalEngine.desktopUa;
+
+  /// 下载/探测媒体时用的 UA
+  static const String _uaMedia = _uaIphone;
+
+  /* ------------------------------------------------------------------ */
+  /* 链接归一化                                                          */
+  /* ------------------------------------------------------------------ */
+
+  /// 路径里的作品号。注意 `slides` ——
+  /// 抖音图文有一种分享形态是 `iesdouyin.com/share/slides/{id}`，
+  /// 旧实现只认 `video|note`，这类链接会掉进「没找到作品号」。
+  static final RegExp _idInPath =
+      RegExp(r'/(?:share/)?(video|note|slides)/(\d{15,25})');
+
+  /// 查询参数里也可能直接带作品号（`modal_id` 是网页版弹层分享的形式）
+  static const List<String> _idQueryKeys = ['aweme_id', 'item_id', 'modal_id'];
+
+  static final RegExp _digitId = RegExp(r'^\d{15,25}$');
+
+  /// 短链还原专用 Dio —— 复用连接，且**不跟随到最终页面的 body**
+  static final Dio _shortDio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 8),
+    receiveTimeout: const Duration(seconds: 12),
     followRedirects: true,
-    maxRedirects: 6,
-    validateStatus: (s) => s != null && s < 400,
+    maxRedirects: 8,
+    validateStatus: (s) => s != null && s < 500,
+    responseType: ResponseType.plain,
   ));
 
+  /// 媒体可用性探测专用 Dio
+  static final Dio _probeDio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 8),
+    receiveTimeout: const Duration(seconds: 12),
+    followRedirects: true,
+    maxRedirects: 5,
+    validateStatus: (s) => s != null && s < 500,
+    responseType: ResponseType.bytes,
+  ));
+
+  /* ------------------------------------------------------------------ */
+  /* 主流程                                                              */
   /* ------------------------------------------------------------------ */
 
   @override
   Future<LocalResult> parse(String url) async {
-    final finalUrl = await _resolveShortLink(url);
-    final id = _extractId(finalUrl) ?? _extractId(url);
-    if (id == null) {
-      throw const LocalParseError('没在链接里找到抖音作品号');
-    }
-
-    final isNote = finalUrl.contains('/note/') || url.contains('/note/');
-    return isNote ? _parseNote(id, url) : _parseVideo(id, url);
-  }
-
-  /// v.douyin.com 短链还原成带作品号的完整地址。
-  ///
-  /// 【先发 HEAD 再考虑 GET】最初写的是先 GET —— 那会把整个分享页（上百 KB）
-  /// 完整下下来，只为读一个跳转地址，白白多花将近一秒。
-  /// HEAD 只拿响应头、不取正文，快得多。只有 HEAD 不灵时才退到 GET。
-  Future<String> _resolveShortLink(String url) async {
-    if (_extractId(url) != null) return url;
-    for (final method in ['HEAD', 'GET']) {
-      try {
-        final r = await _shortLinkDio.request<String>(
-          url,
-          options: Options(method: method, responseType: ResponseType.plain),
-        );
-        final real = r.realUri.toString();
-        if (_extractId(real) != null) return real;
-      } catch (_) {
-        // 换下一种方法
-      }
-    }
-    return url;
-  }
-
-  String? _extractId(String url) {
-    final m = _idInPath.firstMatch(url);
-    if (m != null) return m.group(1);
-    // 兜底：整段里找一串长数字（短链还原后常是这个形态）
-    final t = _idInText.firstMatch(url);
-    return t?.group(1);
-  }
-
-  /* ------------------------------------------------------------------ */
-  /* 视频：拦截详情接口                                                  */
-  /* ------------------------------------------------------------------ */
-
-  /// 视频：走**手机分享页**，不要走 PC 站。
-  ///
-  /// 【为什么换入口 —— 这是整个抖音视频本地化最关键的一步】
-  /// PC 站（`www.douyin.com/video/{id}`）在 WebView 里能加载 72 万字节 HTML、
-  /// 钩子也装上了，但它自己发的 `/aweme/v1/web/aweme/detail/` 请求**拿不到内容**
-  /// （status=0、body 为空），于是播放器起不来、页面里也没有任何视频地址。
-  /// 四条备用路（`<video>` blob、页面脚本、`__pace_f` RSC 流、网络层请求）全堵死。
-  ///
-  /// 换成**手机 UA 打开同一个链接**，抖音会跳到 `m.douyin.com/share/video/{id}` ——
-  /// 这是面向 App 内浏览器/分享场景的页面，**`<video>` 元素里直接挂着可下载的地址**：
-  ///   `https://m.douyin.com/aweme/v1/playwm/?...&video_id=...`
-  ///
-  /// 而且这个 `playwm` 路径换成 `play` 就是**无水印**版本（抖音沿用多年的经典规则）。
-  ///
-  /// 教训和小红书那次一模一样：**入口/形态选错，怎么调都白搭。**
-  Future<LocalResult> _parseVideo(String id, String sourceUrl) async {
-    final engine = LocalEngine.instance;
-    await engine.setUserAgent(LocalEngine.mobileUa);
-    try {
-      var lastUrl = '';
-      var stable = 0;
-      var firstSeenAt = 0;
-
-      final r = await engine.evaluatePolling(
-        'https://www.douyin.com/video/$id',
-        _videoProbeScript,
-        settle: const Duration(milliseconds: 1800),
-        interval: const Duration(milliseconds: 300),
-        timeout: const Duration(seconds: 18),
-        isDone: (v) {
-          if (v is! Map) return false;
-          final u = (v['videoUrl'] ?? '').toString();
-          if (u.isNotEmpty && firstSeenAt == 0) {
-            firstSeenAt = DateTime.now().millisecondsSinceEpoch;
-          }
-          // 等地址出现并稳定两轮，避免拿到播放器切换清晰度时的中间值
-          if (u.isNotEmpty && u == lastUrl) {
-            stable++;
-          } else {
-            stable = 0;
-          }
-          lastUrl = u;
-          if (u.isNotEmpty && stable >= 2) return true;
-          // 兜底：已经有地址但一直变（播放器在切清晰度），最多再等 3 秒
-          if (u.isNotEmpty &&
-              DateTime.now().millisecondsSinceEpoch - firstSeenAt > 3000) {
-            return true;
-          }
-          return false;
-        },
+    final link = await _resolveLink(url);
+    if (link.awemeId.isEmpty) {
+      throw const LocalParseError(
+        '没在链接里找到抖音作品号。\n\n'
+        '请确认复制的是「分享 → 复制链接」的完整内容（形如 '
+        'https://v.douyin.com/xxxx/ 或 https://www.douyin.com/video/7…）。',
       );
+    }
 
-      if (r is! Map) {
-        throw const LocalParseError(_videoFailHint);
+    final entries = _entriesFor(link);
+    final failures = <String>[];
+
+    for (final e in entries) {
+      try {
+        final r = await _tryEntry(e, link);
+        if (r != null) return r;
+        failures.add('${e.label}：页面没有给出可用的媒体地址');
+      } on LocalParseError catch (ex) {
+        failures.add('${e.label}：${ex.message}');
+      } catch (ex) {
+        failures.add('${e.label}：$ex');
       }
-      final rawVideoUrl = (r['videoUrl'] ?? '').toString();
-      if (rawVideoUrl.isEmpty) {
-        throw const LocalParseError(_videoFailHint);
+    }
+
+    throw LocalParseError(
+      '抖音这次没能解析出来（已依次尝试 ${entries.length} 个入口）。\n\n'
+      '常见原因：作品已删除/设为私密、仅好友可见、或短时间内解析太频繁触发了风控。\n'
+      '可以等十几秒再试；如果这条链接在抖音里能正常打开，把链接反馈给我们。\n\n'
+      '—— 各入口结果 ——\n${failures.join('\n')}',
+    );
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 入口候选                                                            */
+  /* ------------------------------------------------------------------ */
+
+  /// 一个解析入口：用什么地址、什么 UA、等多久
+  List<_Entry> _entriesFor(DouyinLink link) {
+    final id = link.awemeId;
+    if (link.kind == DouyinKind.video) {
+      return [
+        // ① PC 作品页 + 手机 UA：会 302 到带 share_sign 的分享页，
+        //    渲染后 `_ROUTER_DATA` 里就是完整作品数据。**目前最稳的一条**。
+        _Entry(
+          label: '手机分享页',
+          url: 'https://www.douyin.com/video/$id',
+          mobile: true,
+          timeout: const Duration(seconds: 22),
+        ),
+        // ② 分享域直达：不带 share_sign 时可能被挡，但对老作品常常可用
+        _Entry(
+          label: 'iesdouyin 分享域',
+          url: 'https://www.iesdouyin.com/share/video/$id/',
+          mobile: true,
+          timeout: const Duration(seconds: 16),
+        ),
+        // ③ PC 作品页 + 桌面 UA：详情接口那条路，作为最后兜底
+        _Entry(
+          label: 'PC 作品页',
+          url: 'https://www.douyin.com/video/$id',
+          mobile: false,
+          timeout: const Duration(seconds: 18),
+        ),
+      ];
+    }
+
+    // 图文（含 slides）：桌面 UA 打开作品页，`__pace_f` 里带全量 images
+    return [
+      _Entry(
+        label: '图文作品页',
+        url: 'https://www.douyin.com/note/$id',
+        mobile: false,
+        timeout: const Duration(seconds: 22),
+      ),
+      // 有些图文的分享形态落在 slides 路由上
+      _Entry(
+        label: 'slides 分享页',
+        url: 'https://www.iesdouyin.com/share/slides/$id/',
+        mobile: false,
+        timeout: const Duration(seconds: 16),
+      ),
+      // 兜底：同一个 id 用 video 路由打开，部分图文作品也能出数据
+      _Entry(
+        label: 'video 路由兜底',
+        url: 'https://www.douyin.com/video/$id',
+        mobile: false,
+        timeout: const Duration(seconds: 16),
+      ),
+    ];
+  }
+
+  Future<LocalResult?> _tryEntry(_Entry e, DouyinLink link) async {
+    final engine = LocalEngine.instance;
+
+    // 【UA 和指纹必须一起切】
+    // 旧实现只切 UA、指纹脚本却一直装"桌面 Chrome"那套（plugins、1440×900、
+    // maxTouchPoints=0）。手机 UA + 桌面指纹是**自相矛盾**的组合，
+    // 平台的风控很容易据此给降级页面 —— 表现就是「页面能打开，但没有任何数据」。
+    await engine.setUserAgent(e.mobile ? _uaIphone : _uaDesktop);
+    try {
+      final t0 = DateTime.now();
+      final env = await engine.evaluatePolling(
+        e.url,
+        _probeScript,
+        settle: e.settle,
+        interval: const Duration(milliseconds: 350),
+        timeout: e.timeout,
+        isDone: (v) => _isEnough(v, since: t0),
+      );
+      if (env is! Map) return null;
+
+      if (kDebugMode) {
+        debugPrint('[抖音] 探针(${e.label})：paceSegs=${env['paceSegs']} '
+            'paceChars=${env['paceChars']} '
+            'paceImages=${(env['paceImages'] as List?)?.length ?? 0} '
+            'domImages=${(env['domImages'] as List?)?.length ?? 0} '
+            'router=${_str(env['router']).length} '
+            'title="${_short(_str(env['title']))}"');
       }
 
-      final noWm = _toNoWatermark(rawVideoUrl);
-      // 解析时就把 302 解掉，直接给下载器 CDN 地址 ——
-      // 否则每次下载都要先请求一次 snssdk 再跳过去，白白多一跳，
-      // 大文件上这一跳的握手开销很明显（用户反馈「下载慢」就有这部分）。
-      final direct = await _resolveRedirect(noWm) ?? noWm;
-      final isPlayable = await _probePlayable(direct);
+      // 【标题/作者补读】
+      // pace 的图片数据到得比 `document.title` 早 —— 轮询一看到 images
+      // 就收工，此时页面标题往往还是空的，界面上就是「46 张图 + 无标题」。
+      // 这里在当前文档再补读几次（不导航，只读，成本很低）。
+      var envFixed = env;
+      if (_str(env['title']).isEmpty || _str(env['author']).isEmpty) {
+        for (var attempt = 0; attempt < 2; attempt++) {
+          final fix = await engine.evalCurrent(_metaFixScript);
+          if (fix is Map) {
+            envFixed = {
+              ...envFixed,
+              'title': _str(envFixed['title']).isNotEmpty
+                  ? envFixed['title']
+                  : fix['title'],
+              'author': _str(envFixed['author']).isNotEmpty
+                  ? envFixed['author']
+                  : fix['author'],
+              'ogImage': _str(envFixed['ogImage']).isNotEmpty
+                  ? envFixed['ogImage']
+                  : fix['ogImage'],
+            };
+          }
+          if (_str(envFixed['title']).isNotEmpty &&
+              _str(envFixed['author']).isNotEmpty) {
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 450));
+        }
+        if (kDebugMode) {
+          debugPrint('[抖音] 补读元信息：title="${_short(_str(envFixed['title']))}" '
+              'author="${_str(envFixed['author'])}"');
+        }
+      }
 
+      final aweme = _buildAweme(envFixed, link.awemeId);
+      if (aweme == null) return null;
+      if (kDebugMode) {
+        debugPrint('[抖音] 入口 ${e.label} 命中数据源 ${aweme.source} '
+            '（图 ${aweme.imageCount} 张，videoId=${aweme.videoId}）');
+      }
+      return await _toResult(aweme, link);
+    } finally {
+      await engine.setUserAgent(_uaDesktop);
+    }
+  }
+
+  /// 轮询结束条件 —— **判据要扎实，不能"拿到一点就收工"**
+  ///
+  /// 只认「平台自己的完整数据」：
+  ///   · `_ROUTER_DATA` 里出现了 `videoInfoRes`（视频作品的完整数据，标题也在里面）
+  ///   · `__pace_f` 里抠到了 images 段（图文作品的全量图集）**且页面标题已就绪**
+  ///   · pace 里抠到了 play_addr（视频作品）
+  ///   · DOM 里出现了**可下载的播放地址**（视频作品没有 pace，这条能提前收工）
+  ///
+  /// 【两个实测踩出来的坑】
+  /// 1. 不能用「DOM 图数 >= 页面计数」收工：动图作品的计数是 `1/1`，
+  ///    而 DOM 里还挂着 14 张推荐位图 —— 条件立刻成立，`__pace_f` 里那份带
+  ///    `playAddr` 的数据再也没机会读。
+  /// 2. 图文**必须等到标题**：图片数据到得比 `document.title` 早，
+  ///    一看到 images 就收工会拿到空标题；退而求其次去 `__pace_f` 里捞
+  ///    `"desc"` 更糟 —— 实测那一堆 desc 全是推荐流的热搜词
+  ///    （"王濛"、"三角洲行动"…），跟作品毫无关系。
+  ///    所以这里最多再等 [titleGrace] 秒，等不到就用页面 title 的空值走补读。
+  bool _isEnough(dynamic v, {required DateTime since}) {
+    if (v is! Map) return false;
+
+    final router = _str(v['router']);
+    if (router.contains('videoInfoRes')) return true;
+
+    final pi = v['paceImages'];
+    if (pi is List && pi.isNotEmpty) {
+      if (_str(v['title']).isNotEmpty) return true;
+      // 图片有了但标题还没上来 → 再给一点时间
+      return DateTime.now().difference(since) > _titleGrace;
+    }
+
+    final pv = v['paceVideo'];
+    if (pv is List && pv.isNotEmpty) return true;
+
+    final vids = v['domVideos'];
+    if (vids is List) {
+      for (final u in vids) {
+        final s = _str(u);
+        if (s.contains('playwm') || s.contains('/play/')) return true;
+      }
+    }
+    return false;
+  }
+
+  /// 等页面标题就绪的最长时间
+  static const Duration _titleGrace = Duration(milliseconds: 1500);
+
+  /* ------------------------------------------------------------------ */
+  /* 数据合成                                                            */
+  /* ------------------------------------------------------------------ */
+
+  /// 把探针回传的四类数据统一成一份作品。
+  ///
+  /// 【优先级】越靠前越权威：
+  ///   1. `_ROUTER_DATA` —— 平台自己 SSR 的作品对象，字段最全
+  ///   2. `__pace_f` 的 images —— 图文的全量图集（含动图视频）
+  ///   3. `__pace_f` 的 play_addr —— 视频作品的播放地址
+  ///   4. DOM —— 前三条都拿不到时的兜底（懒加载/结构变更时它还能救一下）
+  DouyinAweme? _buildAweme(Map env, String awemeId) {
+    final candidates = <DouyinAweme>[];
+
+    final router = _str(env['router']);
+    if (router.isNotEmpty) {
+      final a = DouyinParser.fromRouterData(router);
+      if (a != null && a.usable) candidates.add(a);
+    }
+
+    for (final list in [env['paceImages'], env['paceVideo']]) {
+      if (list is! List) continue;
+      for (final seg in list) {
+        final a = DouyinParser.fromPaceText(
+          _str(seg),
+          wantAwemeId: awemeId,
+          // 页面 title 就是当前作品的标题，比在 pace 里取第一个 "desc" 可靠
+          hintTitle: _str(env['title']),
+          hintAuthor: _str(env['author']),
+        );
+        if (a != null && a.usable) candidates.add(a);
+      }
+    }
+
+    final dom = DouyinParser.fromDomParts(
+      awemeId: awemeId,
+      title: _str(env['title']),
+      author: _str(env['author']),
+      cover: _str(env['ogImage']),
+      imageUrls: _strList(env['domImages']),
+      videoUrls: _strList(env['domVideos']),
+    );
+    if (dom != null && dom.usable) candidates.add(dom);
+
+    if (candidates.isEmpty) return null;
+
+    // 【判定顺序很关键，这里踩过两个坑】
+    //
+    // 坑 1：视频作品的 DOM 兜底也会捡到封面图（1 张），
+    //       如果「有图就当图文」，视频会被解析成「1 张图的图文作品」。
+    // 坑 2：动图（Live Photo）作品的 `<video>` 是动图播放器，
+    //       如果「有视频就当视频」，动图会被解析成一段视频。
+    //
+    // 正确判据：
+    //   a. 图片里有动图（每张图自带 videoUrl）→ 这是图文作品
+    //   b. 有 platform 级 videoId（来自 _ROUTER_DATA / pace 的 play_addr）→ 视频
+    //   c. 图片 >= 2 张 → 图文
+    //   d. 剩下只有「1 张图 + DOM 播放地址」的模糊情况 → 按视频（抖音单图图文极少，
+    //      而视频作品的封面必然只有 1 张）
+    final withImages = candidates.where((e) => e.isImages).toList();
+    final withVideo = candidates.where((e) => e.hasVideo).toList();
+
+    final liveLike = withImages.where((e) => e.hasLivePhotos).toList();
+    if (liveLike.isNotEmpty) {
+      liveLike.sort((a, b) => b.imageCount.compareTo(a.imageCount));
+      return _mergeInfo(liveLike.first, candidates);
+    }
+
+    final byVideoId = withVideo.where((e) => e.videoId.isNotEmpty).toList();
+    if (byVideoId.isNotEmpty) {
+      byVideoId.sort((a, b) => b.playUrls.length.compareTo(a.playUrls.length));
+      return _mergeInfo(byVideoId.first, candidates);
+    }
+
+    final multiImage = withImages.where((e) => e.imageCount >= 2).toList();
+    if (multiImage.isNotEmpty) {
+      multiImage.sort((a, b) => b.imageCount.compareTo(a.imageCount));
+      return _mergeInfo(multiImage.first, candidates);
+    }
+
+    if (withVideo.isNotEmpty) {
+      withVideo.sort((a, b) => b.playUrls.length.compareTo(a.playUrls.length));
+      return _mergeInfo(withVideo.first, candidates);
+    }
+
+    if (withImages.isNotEmpty) {
+      return _mergeInfo(withImages.first, candidates);
+    }
+    return null;
+  }
+
+  /// 用其它候选补齐缺失的元信息（某个来源可能只有图、没有标题作者）
+  DouyinAweme _mergeInfo(DouyinAweme main, List<DouyinAweme> all) {
+    var desc = main.desc;
+    var author = main.author;
+    var cover = main.cover;
+    var music = main.musicName;
+    var duration = main.durationSec;
+    for (final e in all) {
+      if (desc.isEmpty && e.desc.isNotEmpty) desc = e.desc;
+      if (author.isEmpty && e.author.isNotEmpty) author = e.author;
+      if (cover.isEmpty && e.cover.isNotEmpty) cover = e.cover;
+      if (music.isEmpty && e.musicName.isNotEmpty) music = e.musicName;
+      if (duration == 0 && e.durationSec > 0) duration = e.durationSec;
+    }
+    return DouyinAweme(
+      awemeId: main.awemeId.isNotEmpty ? main.awemeId : '',
+      desc: desc,
+      author: author,
+      cover: cover,
+      durationSec: duration,
+      videoId: main.videoId,
+      playUrls: main.playUrls,
+      images: main.images,
+      createTime: main.createTime,
+      musicName: music,
+      width: main.width,
+      height: main.height,
+      source: main.source,
+    );
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 结果转换（含媒体可用性真探测）                                        */
+  /* ------------------------------------------------------------------ */
+
+  Future<LocalResult> _toResult(DouyinAweme a, DouyinLink link) async {
+    if (a.isImages) {
+      final alive = await _verifyImages(a.images);
+      if (!alive) {
+        throw const LocalParseError(
+          '拿到了图片地址，但实际取不到内容（链接可能已签发过期）。'
+          '重新解析一次通常会好。',
+        );
+      }
       return LocalResult(
         platform: key,
         platformName: name,
-        type: 'video',
-        title: (r['title'] ?? '').toString(),
-        author: (r['author'] ?? '').toString(),
-        cover: (r['cover'] ?? '').toString(),
-        durationSec: (r['durationSec'] as num?)?.toInt() ?? 0,
-        resolution: (r['resolution'] ?? '').toString(),
-        videoUrl: isPlayable ? direct : rawVideoUrl,
-        // 手机站的媒体地址要用手机站做 Referer
-        referer: 'https://m.douyin.com/',
-        sourceUrl: sourceUrl,
+        type: 'images',
+        title: a.desc,
+        author: a.author,
+        cover: a.cover.isNotEmpty ? a.cover : a.images.first.url,
+        referer: referer,
+        music: a.musicName,
+        publishTime: _formatTime(a.createTime),
+        images: a.images
+            .map((e) => LocalImage(
+                  url: e.url,
+                  width: e.width,
+                  height: e.height,
+                  videoUrl: e.videoUrl,
+                  durationSec: e.durationSec,
+                ))
+            .toList(),
+        sourceUrl: link.resolvedUrl,
       );
-    } finally {
-      // 一定要还原，否则会污染后续的图文解析（图文必须用桌面 UA）
-      await engine.setUserAgent(LocalEngine.desktopUa);
     }
-  }
 
-  /// 跟着 302 走到最终地址。
-  ///
-  /// 用「只取 1 字节」的 Range GET，而不是 HEAD ——
-  /// 实测 `aweme/v1/play/` 这个接口**只对 GET 返回 302**，HEAD 请求不跳转，
-  /// 所以用 HEAD 会一直解不出最终地址。
-  Future<String?> _resolveRedirect(String url) async {
-    try {
-      final r = await Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 10),
-        followRedirects: true,
-        maxRedirects: 5,
-        validateStatus: (s) => s != null && s < 400,
-        headers: const {
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 7) '
-              'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
-          'Referer': 'https://m.douyin.com/',
-          'Range': 'bytes=0-0',
-        },
-      )).get<List<int>>(url, options: Options(responseType: ResponseType.bytes));
-      final real = r.realUri.toString();
-      return real != url && real.startsWith('http') ? real : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static const String _videoFailHint =      '没能从抖音手机分享页取到视频地址。可能是作品已删除、仅好友可见，或需要登录。\n'
-      '如果这条链接在抖音 App 里能正常打开，麻烦把链接发给我们排查。';
-
-  /// `playwm`（带水印）→ `play`（无水印）。
-  ///
-  /// 【为什么不能只改路径】手机分享页给的是
-  /// `https://m.douyin.com/aweme/v1/playwm/?...&video_id=...`，
-  /// 但 **`m.douyin.com` 上没有 `play` 这个口子**（实测 404）。
-  /// 同一个 `video_id` 在 `aweme.snssdk.com` 上有，而且是**无水印版本**。
-  ///
-  /// 实测同一作品两个地址拿到的文件确实不同：
-  ///   play   → 3,060,859 字节（无水印）
-  ///   playwm → 3,981,301 字节（带水印）
-  ///
-  /// 所以这里保留 `video_id` / `ratio` / `line`，把 host 和路径换成 snssdk 的。
-  String _toNoWatermark(String url) {
-    if (url.isEmpty) return url;
-    final u = Uri.tryParse(url);
-    if (u == null) return url;
-
-    final vid = u.queryParameters['video_id'] ?? '';
-    if (vid.isEmpty) return url;
-
-    final ratio = u.queryParameters['ratio'] ?? '720p';
-    final line = u.queryParameters['line'] ?? '0';
-    return 'https://aweme.snssdk.com/aweme/v1/play/'
-        '?video_id=$vid&ratio=$ratio&line=$line';
-  }
-
-  /// 验证无水印地址真的能取到数据；不行就回退到带水印那条。
-  ///
-  /// 不能想当然认为 `play` 一定可用 —— 平台随时可能收回这个口子。
-  Future<bool> _probePlayable(String url) async {
-    try {
-      final r = await Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 10),
-        validateStatus: (s) => s != null && s < 400,
-        headers: const {
-          'Range': 'bytes=0-1023',
-          'Referer': 'https://m.douyin.com/',
-          'User-Agent': LocalEngine.mobileUa,
-        },
-      )).get<List<int>>(url, options: Options(responseType: ResponseType.bytes));
-      final n = (r.data ?? const <int>[]).length;
-      return (r.statusCode == 200 || r.statusCode == 206) && n > 500;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /* ------------------------------------------------------------------ */
-  /* 图文：从 DOM 抠                                                     */
-  /* ------------------------------------------------------------------ */
-
-  /// 图文：从 DOM 抠。
-  ///
-  /// 【为什么要重试】抖音对同一 IP 的频繁访问会**悄悄降级页面** ——
-  /// 页面能打开、也不报错，就是一张图都不渲染。
-  /// 实测同一个链接：单独跑能拿到 46 张，在一串测试里连着跑就是 0 张。
-  /// 这不是代码问题，是风控。所以失败后歇一下重试一次，
-  /// 两次都不行才报错，并把真实原因告诉用户（而不是含糊地说「失败了」）。
-  Future<LocalResult> _parseNote(String id, String sourceUrl) async {
-    for (var attempt = 0; attempt < 2; attempt++) {
-      // 首次尝试给短超时：如果抖音要降级，通常**一开始就不给图**，
-      // 没必要傻等 20 秒才判断失败。重试那次才给足时间。
-      final r = await _fetchNoteOnce(
-        id,
-        sourceUrl,
-        timeout: attempt == 0
-            ? const Duration(seconds: 9)
-            : const Duration(seconds: 20),
+    final candidates = DouyinParser.videoUrlCandidates(a);
+    final picked = await _pickPlayable(candidates);
+    if (picked == null) {
+      throw const LocalParseError(
+        '找到了作品，但所有播放地址都取不到内容。'
+        '可能是这条作品被限制访问，或 CDN 暂时抽风 —— 稍后重试一般会好。',
       );
-      if (r != null) return r;
-      if (attempt == 0) {
-        // 歇一下再试，给风控一点冷却时间
-        await Future.delayed(const Duration(milliseconds: 1200));
-      }
     }
-    throw const LocalParseError(
-      '抖音这次没返回图片内容。\n\n'
-      '通常是短时间内解析太频繁触发了风控 —— 等十几秒再试一次就好；'
-      '如果一直不行，换个链接试试，或过一会儿再来。',
-    );
-  }
-
-  Future<LocalResult?> _fetchNoteOnce(
-    String id,
-    String sourceUrl, {
-    Duration timeout = const Duration(seconds: 20),
-  }) async {
-    final pageUrl = 'https://www.douyin.com/note/$id';
-
-    // 【为什么改成读 __pace_f 而不是抠 DOM】
-    //
-    // 抠 DOM 有两个硬伤：
-    //   1. 轮播是**懒加载**的 —— 只渲染可见的那几张，得一边等一边数数量，
-    //      慢而且可能漏。
-    //   2. **动图的视频地址根本不在 DOM 里** —— 页面只把静态封面渲染成 <img>，
-    //      用户存下来就是一张死图，动效和声音全丢了。
-    //
-    // 而页面里的 `__pace_f`（React Server Components 的数据流）**一次就带了
-    // 完整的 images 数组**，每项含：
-    //   · urlList[]        —— 静态图（无水印，带 tplv-dy-aweme-images 模板）
-    //   · video.playAddr[] —— **动图的短视频**（带音轨，形如 douyinvod.com/...mp4）
-    //   · clipType == 5    —— 动图标志
-    //
-    // 所以拿到第一条就齐了，不用等稳定；DOM 抠图保留为兜底，
-    // 万一哪天 pace 结构变了还能出结果。
-    final r = await LocalEngine.instance.evaluatePolling(
-      pageUrl,
-      _paceNoteScript,
-      settle: const Duration(milliseconds: 500),
-      interval: const Duration(milliseconds: 250),
-      timeout: timeout,
-      isDone: (v) =>
-          v is Map && v['images'] is List && (v['images'] as List).isNotEmpty,
-    );
-
-    if (r is! Map) return null;
-
-    var rawImages = r['images'];
-    var title = (r['title'] ?? '').toString();
-    var author = (r['author'] ?? '').toString();
-
-    // 【为什么要补读一次 DOM】
-    // `__pace_f` 里的图片数据**来得很早**（页面骨架一出来就有），
-    // 而 `document.title` 和作者名是页面稍后才设上的 ——
-    // 于是「图片有了但标题还是空的」。所以标题/作者缺任何一项都要补读；
-    // 图片没解析出来也走这条路（DOM 抠图兜底）。
-    final needDom = rawImages is! List ||
-        rawImages.isEmpty ||
-        title.isEmpty ||
-        author.isEmpty;
-
-    if (needDom) {
-      final dom = await LocalEngine.instance.evalCurrent(_noteDomScript);
-      if (dom is Map) {
-        final domImages = dom['images'];
-        if ((rawImages is! List || rawImages.isEmpty) && domImages is List) {
-          rawImages = domImages;
-        }
-        if (title.isEmpty) title = (dom['title'] ?? '').toString();
-        if (author.isEmpty) author = (dom['author'] ?? '').toString();
-      }
-    }
-
-    if (rawImages is! List || rawImages.isEmpty) return null;
-
-    final images = <LocalImage>[];
-    for (final it in rawImages) {
-      if (it is! Map) continue;
-      final url = (it['url'] ?? '').toString();
-      if (url.isEmpty) continue;
-      images.add(LocalImage(
-        url: url,
-        width: _asInt(it['width']) ?? 0,
-        height: _asInt(it['height']) ?? 0,
-        videoUrl: (it['videoUrl'] ?? '').toString(),
-        durationSec: _asInt(it['durationSec']) ?? 0,
-      ));
-    }
-    if (images.isEmpty) throw const LocalParseError('图文作品没抓到可用的图片地址');
 
     return LocalResult(
       platform: key,
       platformName: name,
-      type: 'images',
-      title: title,
-      author: author,
-      cover: images.first.url,
+      type: 'video',
+      title: a.desc,
+      author: a.author,
+      cover: a.cover,
+      durationSec: a.durationSec,
+      resolution: _resolutionOf(picked, a),
       referer: referer,
-      images: images,
-      sourceUrl: sourceUrl,
+      music: a.musicName,
+      publishTime: _formatTime(a.createTime),
+      videoUrl: picked,
+      sourceUrl: link.resolvedUrl,
     );
   }
 
-  /// 手机分享页的探针。
+  /// 逐个探测视频候选地址，返回**第一个真能取到视频字节**的。
   ///
-  /// 核心就一句：**`<video>` 元素的 src** —— 手机分享页会把它直接挂在元素上，
-  /// 这是 PC 站无论如何都拿不到的东西。
+  /// 并发前 4 个：抖音的播放接口有时单个节点会 5xx，串行等下去太慢。
   ///
-  /// 注意排除 `blob:` 开头的地址（那是 MSE，不是可下载文件）和平台自己的
-  /// 宣传片（`douyinstatic.com` 上的 mp4）。
-  static const String _videoProbeScript = r'''
-(function () {
-  function good(u) {
-    if (!u) return false;
-    u = String(u);
-    if (u.indexOf('blob:') === 0) return false;         // MSE，不可下载
-    if (u.indexOf('douyinstatic.com') > -1) return false; // 平台宣传片
-    return u.indexOf('http') === 0;
+  /// 【三态判定，不要一刀切】
+  ///   true  = 真取到了 MP4 字节
+  ///   false = 明确失效（4xx/5xx、返回 HTML）
+  ///   null  = 探测本身没做成（超时/DNS/TLS）—— **不能据此判定地址无效**
+  /// 全部为 false 才算彻底失败；只要有一个 null 就先交出去，让下载器再试一次，
+  /// 否则用户网络抖一下就会看到「解析失败」。
+  Future<String?> _pickPlayable(List<String> urls) async {
+    if (urls.isEmpty) return null;
+
+    final batch = urls.take(4).toList();
+    final results = await Future.wait(batch.map(_isPlayable));
+    for (var i = 0; i < results.length; i++) {
+      if (results[i] == true) return batch[i];
+    }
+
+    // 前 4 个都不行时，把剩下的按顺序补测（通常只剩带水印的兜底地址）
+    final rest = urls.skip(4).toList();
+    final restResults = <bool?>[];
+    for (final u in rest) {
+      final ok = await _isPlayable(u);
+      restResults.add(ok);
+      if (ok == true) return u;
+    }
+
+    final all = [...results, ...restResults];
+    if (all.every((r) => r == false)) return null; // 全部明确失效
+    // 存在「探测没做成」的情况 → 交第一个候选，交给下载器
+    return batch.first;
   }
 
-  var v = document.querySelector('video');
-  var url = '';
-  if (v) {
-    if (good(v.currentSrc)) url = String(v.currentSrc);
-    else if (good(v.src)) url = String(v.src);
-    if (!url) {
-      var ss = v.querySelectorAll('source');
-      for (var i = 0; i < ss.length; i++) {
-        if (good(ss[i].src)) { url = String(ss[i].src); break; }
+  /// 真的取一段字回来，并确认它是 MP4 —— 不看状态码，看字节。
+  ///
+  /// 【为什么要看 `ftyp`】抖音的 CDN 在链接失效时**会回 200 带一个 HTML 错误页**，
+  /// 只校验状态码会被骗过去，用户那边表现就是「下载到的文件打不开」。
+  Future<bool?> _isPlayable(String url) async {
+    if (!url.startsWith('http')) return false;
+    try {
+      final r = await _probeDio.get<List<int>>(
+        url,
+        options: Options(headers: {
+          'User-Agent': _uaMedia,
+          'Referer': referer,
+          'Range': 'bytes=0-2047',
+          'Accept': '*/*',
+        }),
+      );
+      final code = r.statusCode ?? 0;
+      final data = r.data ?? const <int>[];
+      if (code != 200 && code != 206) {
+        if (kDebugMode) debugPrint('[抖音] 视频候选 HTTP $code：${_short(url)}');
+        return false;
+      }
+      if (data.length < 512) return false;
+      final mp4 = _looksLikeMp4(data);
+      if (!mp4 && kDebugMode) {
+        debugPrint('[抖音] 视频候选不是 MP4（${data.length}B）：${_short(url)}');
+      }
+      return mp4;
+    } catch (e) {
+      // 网络层异常：不能据此判定地址无效
+      if (kDebugMode) debugPrint('[抖音] 视频探测异常：${_short(url)} → $e');
+      return null;
+    }
+  }
+
+  /// 抽样校验图片可用性 —— **只验首图，且最多等 5 秒**。
+  ///
+  /// 【为什么要克制】抖音的图片地址带 `x-signature` 和 `x-expires`，整批发同一张
+  /// 签名，验一张就能判断"这批还新鲜吗"。早先抽首/中/尾三张并发去验，
+  /// 在网络抖动的模拟器上实测要 **10 秒以上**才回来 —— 而这一步只是防御性检查，
+  /// 不应该让用户干等。现在：一张、5 秒上限、拿不到就放行（交给下载环节再兜底）。
+  Future<bool> _verifyImages(List<DouyinImage> images) async {
+    if (images.isEmpty) return false;
+    bool? ok;
+    try {
+      ok = await _isImageAlive(images.first.url)
+          .timeout(const Duration(seconds: 5), onTimeout: () => null);
+    } catch (_) {
+      ok = null;
+    }
+    if (ok == true) return true;
+    if (ok == false) {
+      if (kDebugMode) debugPrint('[抖音] 首图明确失效');
+      return false;
+    }
+    if (kDebugMode) debugPrint('[抖音] 图片探测超时/网络异常，放行');
+    return true;
+  }
+
+  Future<bool?> _isImageAlive(String url) async {
+    if (!url.startsWith('http')) return false;
+    try {
+      final r = await _probeDio.get<List<int>>(
+        url,
+        options: Options(headers: {
+          'User-Agent': _uaMedia,
+          'Referer': referer,
+          'Range': 'bytes=0-1023',
+          'Accept': '*/*',
+        }),
+      );
+      final code = r.statusCode ?? 0;
+      final data = r.data ?? const <int>[];
+      if (code != 200 && code != 206) {
+        if (kDebugMode) debugPrint('[抖音] 图片 HTTP $code：${_short(url)}');
+        return false;
+      }
+      if (data.length < 128) return false;
+      final html = _startsWithText(data, '<');
+      if (html && kDebugMode) debugPrint('[抖音] 图片返回了 HTML：${_short(url)}');
+      return !html;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[抖音] 图片探测异常：${_short(url)} → $e');
+      return null;
+    }
+  }
+
+  static String _short(String u) => u.length <= 100 ? u : '${u.substring(0, 100)}…';
+
+  static bool _looksLikeMp4(List<int> head) {
+    if (head.length < 12) return false;
+    // ISO BMFF: 4 字节 box 长度 + "ftyp"
+    return head[4] == 0x66 && head[5] == 0x74 && head[6] == 0x79 && head[7] == 0x70;
+  }
+
+  static bool _startsWithText(List<int> data, String ch) {
+    if (data.isEmpty) return false;
+    // 跳过可能的 BOM / 空白
+    for (var i = 0; i < data.length && i < 8; i++) {
+      final c = data[i];
+      if (c == 0x20 || c == 0x0A || c == 0x0D || c == 0x09) continue;
+      return c == ch.codeUnitAt(0);
+    }
+    return false;
+  }
+
+  String _resolutionOf(String url, DouyinAweme a) {
+    final m = RegExp(r'ratio=(\d{3,4})p').firstMatch(url);
+    if (m != null) return '${m.group(1)}P';
+    if (a.height > 0) return '${a.height}P';
+    return '';
+  }
+
+  /// 秒级时间戳 → `yyyy-MM-dd`
+  static String _formatTime(int seconds) {
+    if (seconds <= 0) return '';
+    final dt = DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: false);
+    final y = dt.year.toString().padLeft(4, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final d = dt.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 短链还原                                                            */
+  /* ------------------------------------------------------------------ */
+
+  /// 把 `v.douyin.com/xxxx/` 这类短链还原成带作品号的形式。
+  ///
+  /// 【为什么不是"先 HEAD 再 GET"就够】
+  /// 实测（2026-11）：
+  ///   · `HEAD` 在部分短链上直接 404（desktop UA 尤其常见），只能靠 `GET`；
+  ///   · 同一个短链，iPhone UA 会 302 到 `iesdouyin.com/share/…`（带 share_sign），
+  ///     桌面 UA 会 302 到 `www.douyin.com/video/…` —— **两者都能用，但形态不同**；
+  ///   · 用 Dart 默认 UA 请求时连 TLS 握手都可能被拒。
+  /// 所以这里按 UA 逐个试，任意一个拿到作品号就收工。
+  Future<DouyinLink> _resolveLink(String raw) async {
+    final text = raw.trim();
+    final url = _extractUrl(text) ?? text;
+
+    final direct = _linkFromUrl(url);
+    if (direct.awemeId.isNotEmpty) return direct;
+
+    for (final ua in [_uaIphone, _uaAndroid, _uaDesktop]) {
+      for (final method in const ['GET', 'HEAD']) {
+        try {
+          final r = await _shortDio.request<String>(
+            url,
+            options: Options(
+              method: method,
+              headers: {
+                'User-Agent': ua,
+                'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+              },
+            ),
+          );
+          final real = r.realUri.toString();
+          final hit = _linkFromUrl(real);
+          if (hit.awemeId.isNotEmpty) return hit;
+
+          // 有些短链回的是页面（不跳转），作品号在正文里
+          final body = r.data;
+          if (body is String && body.isNotEmpty) {
+            final fromBody = _linkFromUrl(body);
+            if (fromBody.awemeId.isNotEmpty) {
+              return DouyinLink(fromBody.awemeId, fromBody.kind, real);
+            }
+          }
+        } catch (_) {
+          // 换下一个 UA / 方法
+        }
       }
     }
+    return direct;
   }
 
-  var title = String(document.title || '').replace(/\s*-\s*抖音\s*$/, '').trim();
-
-  // 作者：和图文页一样的「三条约束」，页面上大部分 /user/ 链接都不是作者
-  var author = '';
-  var links = document.querySelectorAll('a[href*="/user/"]');
-  for (var j = 0; j < links.length; j++) {
-    var a = links[j];
-    var href = a.getAttribute('href') || '';
-    if (href.indexOf('self') > -1) continue;
-    var t = String(a.textContent || '').trim();
-    if (!t || t.length > 40) continue;
-    if (!(a.offsetWidth || a.offsetHeight || a.getClientRects().length)) continue;
-    author = t;
-    break;
-  }
-
-  // 手机分享页**一个 /user/ 链接都没有**，昵称是以 @ 开头直接显示在页面上的
-  // （页面文本形如：记录美好生活 | @吨吨八嘎 | 作品标题…）。
-  // 所以这里按「元素本身就是一段以 @ 开头的短文本」来找。
-  if (!author) {
-    var els = document.querySelectorAll('span, div, a, p');
-    for (var k = 0; k < els.length; k++) {
-      var el = els[k];
-      if (el.children.length > 0) continue;      // 必须是叶子节点，别把容器算进来
-      var tx = String(el.textContent || '').trim();
-      if (tx.length < 2 || tx.length > 30) continue;
-      if (tx.charAt(0) !== '@') continue;
-      if (!(el.offsetWidth || el.offsetHeight)) continue;
-      author = tx.replace(/^@/, '');
-      break;
+  /// 从 URL（或一段文本）里认出作品号与内容形态
+  DouyinLink _linkFromUrl(String s) {
+    final m = _idInPath.firstMatch(s);
+    if (m != null) {
+      final kind = m.group(1) == 'video' ? DouyinKind.video : DouyinKind.images;
+      return DouyinLink(m.group(2)!, kind, s);
     }
-  }
 
-  // ---- 封面 ----
-  //
-  // 【为什么不能只取 video.poster】实测抖音的手机分享页上，`<video>` 的
-  // `poster` 属性经常是空的 —— 用户看到的就是一张空白卡片（只有播放按钮）。
-  // 所以按可靠度依次兜底：
-  //   1. og:image（平台给分享卡片准备的图，最稳）
-  //   2. video 的 poster
-  //   3. 页面上第一张够大的图（通常是视频封面）
-  var cover = '';
-  var og = document.querySelector('meta[property="og:image"], meta[name="og:image"]');
-  if (og) cover = String(og.getAttribute('content') || '').trim();
-  if (!cover && v) cover = String(v.poster || '').trim();
-  if (!cover) {
-    var all = document.querySelectorAll('img');
-    for (var q = 0; q < all.length; q++) {
-      var el = all[q];
-      var s = el.currentSrc || el.src || '';
-      if (!s || s.indexOf('http') !== 0) continue;
-      // 太小的多半是头像/图标
-      if (el.naturalWidth && el.naturalWidth < 300) continue;
-      if (/avatar|icon|logo|emoji/i.test(s)) continue;
-      cover = s;
-      break;
+    // 查询参数
+    final at = s.indexOf('?');
+    if (at > 0 && at < s.length - 1) {
+      try {
+        final uri = Uri.parse(s.length > 2000 ? s.substring(0, 2000) : s);
+        for (final k in _idQueryKeys) {
+          final v = uri.queryParameters[k] ?? '';
+          if (_digitId.hasMatch(v)) {
+            return DouyinLink(v, DouyinKind.unknown, s);
+          }
+        }
+      } catch (_) {}
     }
+
+    // 兜底：只从**路径段**里找长数字（不从整串找 —— 那会把 mid/did 之类的
+    // 参数串当成作品号，解析出一个完全不存在的作品，比直接失败更难排查）
+    final pathEnd = s.indexOf('?');
+    final path = pathEnd > 0 ? s.substring(0, pathEnd) : s;
+    for (final seg in path.split('/')) {
+      if (_digitId.hasMatch(seg)) {
+        return DouyinLink(seg, DouyinKind.unknown, s);
+      }
+    }
+    return DouyinLink('', DouyinKind.unknown, s);
   }
-  // 网站常常给 http 的封面地址，必须升到 https —— 否则 Android 会拦明文请求
-  if (cover.indexOf('http://') === 0) cover = 'https://' + cover.substring(7);
 
-  var dur = (v && isFinite(v.duration) && v.duration > 0) ? Math.round(v.duration) : 0;
+  /// 从分享文案里抠出第一个 http(s) 链接
+  static String? _extractUrl(String text) {
+    // 用三引号原始串：字符类里要同时排掉中英文标点和引号，
+    // 单引号原始串写不进 `'`（反斜杠在 raw 里不转义，会直接把串截断）
+    final m = RegExp(r'''https?://[^\s，。、；：！？"'"）】]+''').firstMatch(text);
+    return m?.group(0);
+  }
 
-  // 清晰度：地址里通常带 ratio=720p
-  var res = '';
-  var m = url.match(/ratio=(\d+p)/);
-  if (m) res = m[1].toUpperCase();
+  /* ------------------------------------------------------------------ */
+  /* 页面探针脚本                                                        */
+  /* ------------------------------------------------------------------ */
 
-  return JSON.stringify({
-    videoUrl: url,
-    title: title,
-    author: author,
-    cover: cover,
-    durationSec: dur,
-    resolution: res
-  });
-})()
-''';
-
-  /// 读 `__pace_f`（React Server Components 的数据流）—— **图文作品的主路径**。
+  /// 一次执行，同时把**四类数据源**取回来。
   ///
-  /// 【为什么要用它，而不是抠 DOM】
-  /// 抠 DOM 有两个硬伤：
-  ///   1. 轮播是**懒加载**的，只渲染可见的那几张 —— 得一边等一边数数量，
-  ///      慢，而且可能漏。
-  ///   2. **动图的视频地址根本不在 DOM 里** —— 页面只把静态封面渲染成 `<img>`。
-  ///      用户保存下来就是一张死图，动效和声音全丢。
+  /// 【为什么必须一次取完】
+  /// 每次 `runJavaScriptReturningResult` 都是一次跨进程往返，几百毫秒起步。
+  /// 旧实现为了拿图片数量反复轮询 DOM，光是空转就把解析时间拖到十几秒。
   ///
-  /// 而 `__pace_f` 里一次就带着完整的 `images` 数组：
-  ///   · `urlList[]`        —— 静态图，**无水印**（`downloadUrlList` 才带水印，不用它）
-  ///   · `video.playAddr[]` —— **动图的短视频**（带音轨）
-  ///   · `clipType == 5`    —— 动图标志
+  /// 【为什么要把 pace 在 JS 里裁剪】
+  /// `__pace_f` 拼接起来有 **60 万字符以上**。整段回传给 Dart 会撞上
+  /// Android WebView `evaluateJavascript` 的返回值上限（表现为拿到 null）。
+  /// 所以这里只把**真正有用的片段**（images 数组、play_addr 对象）抠出来，
+  /// 单段十几 KB，既安全又完整。
   ///
-  /// 【一个踩过的坑】`playAddr` 是**数组**，元素字段名是 `src`。
-  /// 一开始按对象处理、找 `playAddr.urlList`，结果永远是 0 条 ——
-  /// 明明数据就在眼前却拿不到。
-  static const String _paceNoteScript = r'''
+  /// 【为什么带缓存】
+  /// 轮询每 350ms 执行一次，每次都重扫 600KB 太浪费。一旦"确认够用"就把
+  /// 结果缓存到 `window.__fsDyCache`；导航到新文档时该变量自然消失，不会串数据。
+  static const String _probeScript = r'''
 (function () {
-  var host = '';
-  function scan() {
-    var f = window.__pace_f || [];
-    for (var i = 0; i < f.length; i++) {
-      var s = '';
-      try { s = String(f[i]); } catch (e) { continue; }
-      if (s.indexOf('"images":[{"width"') > -1) { host = s; break; }
-    }
-    if (!host) return null;
+  // 同一文档里已经拿到完整数据 → 直接返回，省掉每轮 600KB 的重扫
+  if (window.__fsDyCache) return window.__fsDyCache;
 
-    // 平衡括号抠出完整的数组 —— JSON.parse 需要一整段，不能截断
-    var at = host.indexOf('"images":[');
-    var start = host.indexOf('[', at);
-    var depth = 0, inStr = false, esc = false, end = -1;
-    for (var k = start; k < host.length; k++) {
-      var ch = host.charAt(k);
+  // 从 at 处抠出一段平衡的 JSON（正确处理字符串里的括号与转义）
+  function balanced(s, at) {
+    var i = at;
+    while (i < s.length && ' \n\r\t'.indexOf(s.charAt(i)) >= 0) i++;
+    if (i >= s.length) return '';
+    var open = s.charAt(i);
+    if (open !== '[' && open !== '{') return '';
+    var depth = 0, inStr = false, esc = false;
+    for (var k = i; k < s.length; k++) {
+      var ch = s.charAt(k);
       if (inStr) {
         if (esc) esc = false;
         else if (ch === '\\') esc = true;
         else if (ch === '"') inStr = false;
         continue;
       }
-      if (ch === '"') { inStr = true; continue; }
-      if (ch === '[' || ch === '{') depth++;
-      else if (ch === ']' || ch === '}') { depth--; if (depth === 0) { end = k; break; } }
-    }
-    if (end < 0) return null;
-    try { return JSON.parse(host.slice(start, end + 1)); } catch (e) { return null; }
-  }
-
-  var host = '';
-  var arr = scan();
-  if (!arr) return JSON.stringify({ images: [] });
-
-  var out = [];
-  for (var n = 0; n < arr.length; n++) {
-    var it = arr[n] || {};
-    var list = it.urlList || it.url_list || [];
-    var url = list.length ? String(list[0]) : '';
-    if (!url) continue;
-
-    var item = { url: url, width: it.width || 0, height: it.height || 0 };
-
-    // 动图：视频地址在 video.playAddr（数组，元素字段是 src）
-    var v = it.video;
-    if (v) {
-      var pa = v.playAddr || v.play_addr || [];
-      var src = '';
-      if (pa && pa.length) {
-        for (var j = 0; j < pa.length && !src; j++) {
-          if (pa[j] && pa[j].src) src = String(pa[j].src);
-          else if (pa[j] && pa[j].url) src = String(pa[j].url);
-        }
-      }
-      if (src) {
-        item.videoUrl = src;
-        item.durationSec = Math.round((Number(v.duration) || 0) / 1000);
+      if (ch === '"') inStr = true;
+      else if (ch === '[' || ch === '{') depth++;
+      else if (ch === ']' || ch === '}') {
+        depth--;
+        if (depth === 0) return s.substring(i, k + 1);
       }
     }
-    out.push(item);
+    return '';
   }
 
-  // ---- 标题 / 作者 ----
+  // ---- 1) _ROUTER_DATA：视频分享页渲染后含 videoInfoRes ----
+  var router = '';
+  try {
+    if (window._ROUTER_DATA) router = JSON.stringify(window._ROUTER_DATA);
+  } catch (e) {}
+
+  // ---- 2) __pace_f：图文的全量 images / 视频的 play_addr ----
   //
-  // 【必须从 pace 数据里取，不能读 document.title】
-  // pace 里的图片数据**来得很早**（页面骨架一出来就有），
-  // 那一刻 `document.title` 还没设上 —— 于是会出现「46 张图都有了、标题却是空的」。
-  // 直接在 pace 文本里抓 desc / nickname 最稳。
-  function grab(re) {
-    var m = host.match(re);
-    if (!m) return '';
-    var s = m[1];
-    // 处理 JSON 转义
-    try { return JSON.parse('"' + s + '"'); } catch (e) { return s; }
+  // 【为什么不用 String(segs[i]) 直接转】`__pace_f` 的元素通常是「数组里套字符串」
+  // 的 RSC 分片，`String()` 会把分片拼成 "1,1:I{...}"（带序号和逗号），
+  // 遇到嵌套更深的元素甚至会变成 "[object Object]" —— 数据明明在，却永远提取不到。
+  // 这里逐层收集**字符串元素**再拼接，任何结构都能拿到正文。
+  function collectPaceText() {
+    var segs = window.__pace_f || [];
+    var parts = [];
+    function dig(v, depth) {
+      if (v == null || depth > 3) return;
+      if (typeof v === 'string') { parts.push(v); return; }
+      if (typeof v === 'object' && v.length !== undefined) {
+        for (var i = 0; i < v.length; i++) dig(v[i], depth + 1);
+        return;
+      }
+      if (typeof v === 'object') {
+        try { parts.push(JSON.stringify(v)); } catch (e) {}
+      }
+    }
+    try { dig(segs, 0); } catch (e) {}
+    return parts.join('\n');
   }
 
-  var title = grab(/"desc":"((?:[^"\\]|\\.)*)"/);
-  if (!title) title = String(document.title || '').replace(/\s*-\s*抖音\s*$/, '').trim();
+  var paceImages = [];
+  var paceVideo = [];
+  var paceChars = 0;
+  var paceSegs = 0;
+  try {
+    paceSegs = (window.__pace_f || []).length;
+    var s = collectPaceText();
+    paceChars = s.length;
+    var from = 0;
+    while (paceImages.length < 4) {
+      var at = s.indexOf('"images":', from);
+      if (at < 0) break;
+      from = at + 9;
+      var sub = balanced(s, at + 9);
+      if (sub && sub.length > 8) paceImages.push('"images":' + sub);
+    }
+    var at2 = s.indexOf('"play_addr":');
+    if (at2 >= 0) {
+      var sub2 = balanced(s, at2 + 12);
+      if (sub2) paceVideo.push('"play_addr":' + sub2);
+    }
+  } catch (e) {}
 
-  var author = grab(/"nickname":"((?:[^"\\]|\\.)*)"/);
-  if (!author) {
-    // pace 里没有就退回 DOM：页面上有 19 个 /user/ 链接，只有 1 个是真作者 ——
-    // 必须同时满足「非 self」「元素可见」「文本非空」
+  // ---- 3) DOM：懒加载/结构变更时的兜底 ----
+  var domImages = [];
+  var seen = {};
+  try {
+    var imgs = document.querySelectorAll('img');
+    for (var q = 0; q < imgs.length; q++) {
+      var src = imgs[q].currentSrc || imgs[q].src || '';
+      if (!src || src.indexOf('http') !== 0) continue;
+      // 作品图的判据：douyinpic 域 + aweme-images 模板
+      if (src.indexOf('aweme-images') < 0 && src.indexOf('douyinpic.com') < 0) continue;
+      var m = /tos-cn-i-[a-z0-9]+\/([A-Za-z0-9_~\-]+)/.exec(src);
+      var key = m ? m[1] : src;
+      if (seen[key]) continue;
+      seen[key] = 1;
+      domImages.push(src);
+    }
+  } catch (e) {}
+
+  var domVideos = [];
+  try {
+    var vels = document.querySelectorAll('video, source');
+    for (var v = 0; v < vels.length; v++) {
+      var u = vels[v].currentSrc || vels[v].src || '';
+      if (u && u.indexOf('http') === 0 && domVideos.indexOf(u) < 0) domVideos.push(u);
+    }
+  } catch (e) {}
+
+  // ---- 4) 元信息 ----
+  var bodyText = '';
+  try { bodyText = String(document.body ? document.body.innerText : ''); } catch (e) {}
+
+  // 页面上的「当前/总数」（如 4/46）—— 用来判断图集是否齐了
+  var counter = 0;
+  try {
+    var cm = bodyText.match(/(?:^|\s)\d{1,3}\s*\/\s*(\d{1,4})(?:\s|$)/);
+    if (cm) counter = parseInt(cm[1], 10) || 0;
+  } catch (e) {}
+
+  var title = '';
+  try {
+    title = String(document.title || '').replace(/\s*-\s*抖音\s*$/, '').trim();
+  } catch (e) {}
+
+  var ogImage = '';
+  try {
+    var og = document.querySelector('meta[property="og:image"], meta[name="og:image"]');
+    if (og) ogImage = String(og.getAttribute('content') || '').trim();
+  } catch (e) {}
+
+  // 作者：三条约束缺一不可（非 self、元素可见、文本短）
+  var author = '';
+  try {
     var links = document.querySelectorAll('a[href*="/user/"]');
     for (var p = 0; p < links.length; p++) {
       var a = links[p];
@@ -597,62 +931,124 @@ class DouyinLocalPlatform extends LocalPlatform {
       author = t;
       break;
     }
-  }
+    if (!author) {
+      // 手机分享页没有 /user/ 链接，昵称以 @ 开头直接显示
+      var els = document.querySelectorAll('span, div, a, p');
+      for (var z = 0; z < els.length; z++) {
+        var el = els[z];
+        if (el.children.length > 0) continue;
+        var tx = String(el.textContent || '').trim();
+        if (tx.length < 2 || tx.length > 30) continue;
+        if (tx.charAt(0) !== '@') continue;
+        if (!(el.offsetWidth || el.offsetHeight)) continue;
+        author = tx.replace(/^@/, '');
+        break;
+      }
+    }
+  } catch (e) {}
 
-  return JSON.stringify({ images: out, title: title, author: author });
+  var out = JSON.stringify({
+    url: String(location.href || ''),
+    router: router,
+    paceImages: paceImages,
+    paceVideo: paceVideo,
+    paceSegs: paceSegs,
+    paceChars: paceChars,
+    domImages: domImages,
+    domVideos: domVideos,
+    title: title,
+    author: author,
+    counter: counter,
+    ogImage: ogImage
+  });
+
+  // 只有"数据确实齐了"才缓存，避免把骨架阶段的半截数据钉死
+  var solid = (router && router.indexOf('videoInfoRes') > -1) ||
+              paceImages.length > 0 ||
+              paceVideo.length > 0;
+  if (solid) window.__fsDyCache = out;
+  return out;
 })()
 ''';
 
-  /// 同步表达式，返回 JSON 字符串。
+  /// 元信息补读：只在**当前文档**里取值，不导航、不等待。
   ///
-  /// 图片判据：URL 带 `tplv-dy-aweme-images` 且落在这两个 CDN 域上 ——
-  /// 其余都是 UI 图标 / 头像 / 二维码。按对象 id 去重（同一张图有 1x/2x 两个地址）。
-  ///
-  /// 作者判据三条缺一不可：非 `/user/self`、元素可见、文本非空。
-  /// 页面上有 19 个 `a[href*="/user/"]`，只有 1 个是真作者 ——
-  /// 少任何一条都会抓到推荐流里的隐藏元素，甚至不可见字符组成的假名字。
-  static const String _noteDomScript = r'''
+  /// 标题按可靠度依次取：`document.title`（去掉后缀）→ `og:title` →
+  /// 页面上的标题节点 → `__pace_f` 里的第一个 `desc`。
+  /// 作者：`/user/` 链接（三条约束）→ `@` 开头的叶节点 → `og:author`。
+  static const String _metaFixScript = r'''
 (function () {
-  var seen = {}, out = [];
-  var all = document.querySelectorAll('img');
-  for (var i = 0; i < all.length; i++) {
-    var el = all[i];
-    var src = el.currentSrc || el.src || '';
-    if (!src || src.indexOf('data:') === 0) continue;
-    if (src.indexOf('aweme-images') === -1) continue;
-    if (!/douyinpic\.com|byteimg\.com/.test(src)) continue;
-    var m = src.match(/tos-cn-i-[a-z0-9]+\/([A-Za-z0-9_~-]+?)~/);
-    var key = m ? m[1] : src;
-    if (seen[key]) continue;
-    seen[key] = 1;
-    out.push({ url: src, width: el.naturalWidth || 0, height: el.naturalHeight || 0 });
+  function clean(s) {
+    return String(s || '').replace(/\s*-\s*抖音\s*$/, '').replace(/\s+/g, ' ').trim();
+  }
+  function meta(prop) {
+    var el = document.querySelector('meta[property="' + prop + '"]') ||
+             document.querySelector('meta[name="' + prop + '"]');
+    return el ? String(el.getAttribute('content') || '') : '';
   }
 
-  var title = String(document.title || '').replace(/\s*-\s*抖音\s*$/, '').trim();
+  var title = clean(document.title);
+  if (!title) title = clean(meta('og:title'));
 
-  // 页面上直接写着「当前/总数」（比如 4/46）—— 拿它当「齐了没」的判据，
-  // 比等「数量不再变化」快得多：一集齐立刻收工，不用干等观察窗口。
-  var total = 0;
-  try {
-    var tm = String(document.body ? document.body.innerText : '')
-        .match(/(?:^|\s)\d{1,3}\s*\/\s*(\d{1,4})(?:\s|$)/);
-    if (tm) total = parseInt(tm[1], 10) || 0;
-  } catch (e) {}
+  // 【最可靠的一条：`发布时间：…` 前面那一行就是作品标题】
+  // 实测抖音图文页里 `document.title` 在 Android WebView 中可能一直是空的
+  // （页面标题由渲染进程异步设置），而正文里稳定存在：
+  //     <标题>\n发布时间：2026-09-08 13:46:12
+  // 这个位置比任何 class 名都稳（class 是构建期生成的哈希，随时会变）。
+  if (!title) {
+    try {
+      var body = String(document.body ? document.body.innerText : '');
+      var m = body.match(/([^\n]{2,160})\n\s*发布时间/);
+      if (m) title = clean(m[1]);
+    } catch (e) {}
+  }
+
+  // 再退一步：标题节点（h1/h2/h3 的第一个通常就是当前作品）
+  if (!title) {
+    var hs = document.querySelectorAll('h1, h2, h3, [data-e2e*="desc"], [data-e2e*="title"]');
+    for (var i = 0; i < hs.length; i++) {
+      var t = clean(hs[i].textContent);
+      if (t.length >= 2 && t.length <= 120) { title = t; break; }
+    }
+  }
+  if (!title) {
+    // 【别再往 __pace_f 里捞 "desc" 了】
+    // 实测：一页里 68 个 desc 全是推荐流的热搜词（"王濛"、"三角洲行动"…），
+    // 跟当前作品毫无关系。用它当标题 = 给用户看别人的东西，
+    // 比标题空着恶劣得多。宁可空着，让界面显示占位。
+  }
 
   var author = '';
   var links = document.querySelectorAll('a[href*="/user/"]');
-  for (var j = 0; j < links.length; j++) {
-    var a = links[j];
-    var href = a.getAttribute('href') || '';
-    if (href.indexOf('self') > -1) continue;
-    var t = String(a.textContent || '').trim();
-    if (!t || t.length > 40) continue;
+  for (var k = 0; k < links.length; k++) {
+    var a = links[k];
+    if ((a.getAttribute('href') || '').indexOf('self') > -1) continue;
+    var tx = clean(a.textContent);
+    if (!tx || tx.length > 40) continue;
     if (!(a.offsetWidth || a.offsetHeight || a.getClientRects().length)) continue;
-    author = t;
-    break;
+    author = tx; break;
+  }
+  if (!author) {
+    var els = document.querySelectorAll('span, div, a, p');
+    for (var z = 0; z < els.length; z++) {
+      var el = els[z];
+      if (el.children.length > 0) continue;
+      var s2 = clean(el.textContent);
+      if (s2.length < 2 || s2.length > 30) continue;
+      if (s2.charAt(0) !== '@') continue;
+      if (!(el.offsetWidth || el.offsetHeight)) continue;
+      author = s2.replace(/^@/, ''); break;
+    }
+  }
+  if (!author) author = clean(meta('og:author'));
+
+  var ogImage = meta('og:image');
+  if (!ogImage) {
+    var v0 = document.querySelector('video');
+    if (v0 && v0.poster) ogImage = String(v0.poster);
   }
 
-  return JSON.stringify({ images: out, title: title, author: author, total: total });
+  return JSON.stringify({ title: title, author: author, ogImage: ogImage });
 })()
 ''';
 
@@ -660,10 +1056,50 @@ class DouyinLocalPlatform extends LocalPlatform {
   /* 小工具                                                              */
   /* ------------------------------------------------------------------ */
 
-  int? _asInt(dynamic v) {
-    if (v is int) return v;
-    if (v is num) return v.toInt();
-    if (v is String) return int.tryParse(v);
-    return null;
+  static String _str(dynamic v) {
+    if (v == null) return '';
+    if (v is String) return v;
+    return v.toString();
   }
+
+  static List<String> _strList(dynamic v) {
+    if (v is! List) return const [];
+    return v.map(_str).where((e) => e.isNotEmpty).toList();
+  }
+}
+
+/// 作品内容形态
+enum DouyinKind { video, images, unknown }
+
+/// 归一化之后的链接信息
+class DouyinLink {
+  final String awemeId;
+  final DouyinKind kind;
+
+  /// 还原后的地址（短链还原后会带上 share 参数，报错信息里用它更有用）
+  final String resolvedUrl;
+
+  const DouyinLink(this.awemeId, this.kind, this.resolvedUrl);
+}
+
+/// 一个解析入口
+class _Entry {
+  final String label;
+  final String url;
+  final bool mobile;
+  final Duration timeout;
+
+  const _Entry({
+    required this.label,
+    required this.url,
+    required this.mobile,
+    required this.timeout,
+  });
+
+  /// 导航后的静置时间。
+  ///
+  /// 【v0.1.0 从 900ms 调到 1200ms】实测：桌面 UA 打开图文页时，900ms 有时
+  /// 还没等到 `__pace_f` 就绪（页面骨架出来了、RSC 流还在灌），
+  /// 于是只能退回 DOM 抠到 8 张懒加载图 —— 表现就是「46 张的图文只出来 8 张」。
+  Duration get settle => const Duration(milliseconds: 1200);
 }
