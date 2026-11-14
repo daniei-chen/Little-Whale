@@ -178,8 +178,13 @@ class LocalEngine {
   /// 页面常常会 302 一跳（比如 www → 带参数的地址），一跳就是新文档，
   /// 之前装的脚本全没了。等 300ms 的轮询周期太慢 —— 页面的接口请求
   /// 往往在新文档起来后几百毫秒内就发出去了，晚一步就抓不到。
+  ///
+  /// 【v0.1.2 从 5 次降到 2 次】钩子脚本本身是幂等的（`__fsHooked` 判断），
+  /// 重复注入不会更安全，只会占住 WebView 的 JS 执行队列 —— 而轮询读数据
+  /// 走的是同一条队列。实测每次 `runJavaScript` 往返 100–300ms，
+  /// 5 轮 × 2 个脚本就把首批轮询活活压后 1–2 秒。
   Future<void> _installHookBurst() async {
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; i < 2; i++) {
       await _installStealth();
       await _installHook();
       await Future.delayed(const Duration(milliseconds: 150));

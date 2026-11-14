@@ -472,9 +472,13 @@ class DouyinParser {
     int durationSec = 0,
     List<String> imageUrls = const [],
     List<String> videoUrls = const [],
+    int maxImages = 0,
   }) {
     final images = <DouyinImage>[];
     for (final u in imageUrls) {
+      // 【maxImages 是防御性上限】DOM 里除了作品图，还可能有推荐位/封面图。
+      // 页面自己写着「5/46」，那我们最多认 46 张 —— 多出来的必然不是这条作品的。
+      if (maxImages > 0 && images.length >= maxImages) break;
       if (!u.startsWith('http')) continue;
       if (!isDouyinImageHost(u)) continue;
       images.add(DouyinImage(url: u));

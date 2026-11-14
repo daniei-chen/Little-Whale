@@ -92,8 +92,10 @@ class DouyinLocalPlatform extends LocalPlatform {
 
   /// 短链还原专用 Dio —— 复用连接，且**不跟随到最终页面的 body**
   static final Dio _shortDio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 8),
-    receiveTimeout: const Duration(seconds: 12),
+    // 【v0.1.2 收紧】短链还原只是一次 302 跟随，页面上百 KB 的正文我们并不需要。
+    // 原来给 8s/12s，遇到网络抽风时会挨个等满 —— 实测这样一次解析能多花 8 秒。
+    connectTimeout: const Duration(seconds: 4),
+    receiveTimeout: const Duration(seconds: 5),
     followRedirects: true,
     maxRedirects: 8,
     validateStatus: (s) => s != null && s < 500,
@@ -102,8 +104,13 @@ class DouyinLocalPlatform extends LocalPlatform {
 
   /// 媒体可用性探测专用 Dio
   static final Dio _probeDio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 8),
-    receiveTimeout: const Duration(seconds: 12),
+    // 【v0.1.2 收紧】这两个超时原先给的是 8s / 12s，本意是"稳一点"，
+    // 实测代价极大：weme.snssdk.com 的 play 接口在某些网络下会挂住，
+    // 于是 4 个候选并发探测要一起等到 12 秒 —— 用户看到的就是"点了解析，
+    // 转圈二十多秒才出来"。探测只是确认"能不能取到一段字"，
+    // 4 秒足够；真取不到再让下载环节兜底。
+    connectTimeout: const Duration(seconds: 4),
+    receiveTimeout: const Duration(seconds: 4),
     followRedirects: true,
     maxRedirects: 5,
     validateStatus: (s) => s != null && s < 500,
@@ -242,7 +249,7 @@ class DouyinLocalPlatform extends LocalPlatform {
       // 这里在当前文档再补读几次（不导航，只读，成本很低）。
       var envFixed = env;
       if (_str(env['title']).isEmpty || _str(env['author']).isEmpty) {
-        for (var attempt = 0; attempt < 2; attempt++) {
+        for (var attempt = 0; attempt < 1; attempt++) {
           final fix = await engine.evalCurrent(_metaFixScript);
           if (fix is Map) {
             envFixed = {
@@ -262,7 +269,7 @@ class DouyinLocalPlatform extends LocalPlatform {
               _str(envFixed['author']).isNotEmpty) {
             break;
           }
-          await Future<void>.delayed(const Duration(milliseconds: 450));
+          await Future<void>.delayed(const Duration(milliseconds: 300));
         }
         if (kDebugMode) {
           debugPrint('[抖音] 补读元信息：title="${_short(_str(envFixed['title']))}" '
@@ -270,13 +277,21 @@ class DouyinLocalPlatform extends LocalPlatform {
         }
       }
 
+      final tBuild = DateTime.now();
       final aweme = _buildAweme(envFixed, link.awemeId);
       if (aweme == null) return null;
       if (kDebugMode) {
         debugPrint('[抖音] 入口 ${e.label} 命中数据源 ${aweme.source} '
             '（图 ${aweme.imageCount} 张，videoId=${aweme.videoId}）');
       }
-      return await _toResult(aweme, link);
+      final r = await _toResult(aweme, link);
+      if (kDebugMode) {
+        final tEnd = DateTime.now();
+        debugPrint('[抖音] 耗时拆解：采集=${tBuild.difference(t0).inMilliseconds}ms '
+            '媒体校验=${tEnd.difference(tBuild).inMilliseconds}ms '
+            '总计=${tEnd.difference(t0).inMilliseconds}ms');
+      }
+      return r;
     } finally {
       await engine.setUserAgent(_uaDesktop);
     }
@@ -315,6 +330,11 @@ class DouyinLocalPlatform extends LocalPlatform {
     final pv = v['paceVideo'];
     if (pv is List && pv.isNotEmpty) return true;
 
+    // DOM 严格过滤后已经凑齐页面计数 → 收工（不必为了 pace 死等满超时）
+    final counter = _intOr(v['counter'], 0);
+    final dom = v['domImages'];
+    if (counter > 0 && dom is List && dom.length >= counter) return true;
+
     final vids = v['domVideos'];
     if (vids is List) {
       for (final u in vids) {
@@ -323,6 +343,13 @@ class DouyinLocalPlatform extends LocalPlatform {
       }
     }
     return false;
+  }
+
+  static int _intOr(dynamic v, int fallback) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v) ?? fallback;
+    return fallback;
   }
 
   /// 等页面标题就绪的最长时间
@@ -369,6 +396,7 @@ class DouyinLocalPlatform extends LocalPlatform {
       cover: _str(env['ogImage']),
       imageUrls: _strList(env['domImages']),
       videoUrls: _strList(env['domVideos']),
+      maxImages: _intOr(env['counter'], 0),
     );
     if (dom != null && dom.usable) candidates.add(dom);
 
@@ -525,24 +553,30 @@ class DouyinLocalPlatform extends LocalPlatform {
   Future<String?> _pickPlayable(List<String> urls) async {
     if (urls.isEmpty) return null;
 
-    final batch = urls.take(4).toList();
+    // 前 2 个是**最可能可用的无水印 1080P**（snssdk / www 两条）
+    final batch = urls.take(2).toList();
     final results = await Future.wait(batch.map(_isPlayable));
     for (var i = 0; i < results.length; i++) {
       if (results[i] == true) return batch[i];
     }
 
-    // 前 4 个都不行时，把剩下的按顺序补测（通常只剩带水印的兜底地址）
-    final rest = urls.skip(4).toList();
-    final restResults = <bool?>[];
-    for (final u in rest) {
-      final ok = await _isPlayable(u);
-      restResults.add(ok);
-      if (ok == true) return u;
+    // 【关键：只有「全都明确失效」才值得继续串行试】
+    //
+    // 实测踩到的坑：抖音视频这一次要 25 秒，日志里是
+    //   `aweme.snssdk.com/.../play/?ratio=1080p` receive timeout 4s
+    // 因为前两个候选探测超时（返回 null），代码继续串行试后面 4 个兜底地址，
+    // 每个又是 4 秒 —— 光"确认地址能不能用"就花了 16 秒。
+    //
+    // 但「探测没做成」和「地址失效」是两件事：前者说明本机到 CDN 的网络有问题，
+    // 这时候换地址也是同样的网络，串行试探没有意义。直接交第一个给下载器，
+    // 它那边还有一次重试机会，而且用户至少立刻看到结果。
+    if (results.every((r) => r == false)) {
+      for (final u in urls.skip(2)) {
+        if (await _isPlayable(u) == true) return u;
+      }
+      return null; // 全部明确失效
     }
 
-    final all = [...results, ...restResults];
-    if (all.every((r) => r == false)) return null; // 全部明确失效
-    // 存在「探测没做成」的情况 → 交第一个候选，交给下载器
     return batch.first;
   }
 
@@ -581,7 +615,7 @@ class DouyinLocalPlatform extends LocalPlatform {
     }
   }
 
-  /// 抽样校验图片可用性 —— **只验首图，且最多等 5 秒**。
+  /// 抽样校验图片可用性 —— **只验首图，且最多等 3 秒**。
   ///
   /// 【为什么要克制】抖音的图片地址带 `x-signature` 和 `x-expires`，整批发同一张
   /// 签名，验一张就能判断"这批还新鲜吗"。早先抽首/中/尾三张并发去验，
@@ -592,7 +626,7 @@ class DouyinLocalPlatform extends LocalPlatform {
     bool? ok;
     try {
       ok = await _isImageAlive(images.first.url)
-          .timeout(const Duration(seconds: 5), onTimeout: () => null);
+          .timeout(const Duration(seconds: 3), onTimeout: () => null);
     } catch (_) {
       ok = null;
     }
@@ -689,8 +723,17 @@ class DouyinLocalPlatform extends LocalPlatform {
     final direct = _linkFromUrl(url);
     if (direct.awemeId.isNotEmpty) return direct;
 
-    for (final ua in [_uaIphone, _uaAndroid, _uaDesktop]) {
-      for (final method in const ['GET', 'HEAD']) {
+    // 【为什么只留 3 种组合】实测 iPhone UA + GET 的命中率最高，
+    // 其余两种是它被拦时的备选。原来 3 UA × 2 方法 = 6 次，
+    // 网络不好时光"试错"就要十几秒。
+    for (final combo in const [
+      (_uaIphone, 'GET'),
+      (_uaIphone, 'HEAD'),
+      (_uaAndroid, 'GET'),
+    ]) {
+      final ua = combo.$1;
+      final method = combo.$2;
+      {
         try {
           final r = await _shortDio.request<String>(
             url,
@@ -876,8 +919,14 @@ class DouyinLocalPlatform extends LocalPlatform {
     for (var q = 0; q < imgs.length; q++) {
       var src = imgs[q].currentSrc || imgs[q].src || '';
       if (!src || src.indexOf('http') !== 0) continue;
-      // 作品图的判据：douyinpic 域 + aweme-images 模板
-      if (src.indexOf('aweme-images') < 0 && src.indexOf('douyinpic.com') < 0) continue;
+      // 【判据必须严格：只认 aweme-images 模板】
+      // 实测同一条图文页里，DOM 会同时出现两类 douyinpic 图：
+      //   作品图  …~tplv-dy-aweme-images:q75.webp?biz_tag=aweme_images   ← 要
+      //   封面/推荐 …~tplv-dy-resize-walign-adapt-aq:540:q75.webp?biz_tag=aweme_video ← 不要
+      // 早先的判据只要求「douyinpic 域」，于是一条 46 张的图文能收出 58 张 ——
+      // 多出来的 12 张是推荐位，用户会存到完全不相干的图。
+      if (src.indexOf('aweme-images') < 0) continue;
+      if (src.indexOf('biz_tag=aweme_video') > -1) continue;
       var m = /tos-cn-i-[a-z0-9]+\/([A-Za-z0-9_~\-]+)/.exec(src);
       var key = m ? m[1] : src;
       if (seen[key]) continue;
@@ -1101,5 +1150,5 @@ class _Entry {
   /// 【v0.1.0 从 900ms 调到 1200ms】实测：桌面 UA 打开图文页时，900ms 有时
   /// 还没等到 `__pace_f` 就绪（页面骨架出来了、RSC 流还在灌），
   /// 于是只能退回 DOM 抠到 8 张懒加载图 —— 表现就是「46 张的图文只出来 8 张」。
-  Duration get settle => const Duration(milliseconds: 1200);
+  Duration get settle => const Duration(milliseconds: 900);
 }
