@@ -270,6 +270,25 @@ MediaMetadataRetriever 抽帧（8fps，OPTION_CLOSEST）
 第二条会读到第一条的残留数据（实测踩过：解析抖音动图，出来的是上一条的 46 张图）。
 现在的做法是导航前在当前文档打标记，等标记在新文档里消失才开始读。
 
+### 为什么不直接用一个现成的解析库
+
+调研过 `yt-dlp`、`f2`、`TikTokDownload`、`Douyin_TikTok_Download_API` 这几条主流路线，
+结论是**它们都绕不开签名，而且都要求用户自己提供 Cookie**：
+
+- **yt-dlp** 的 `DouyinIE` 直接调 `aweme/v1/web/aweme/detail/`，源码里写着
+  `# TODO: Run verification challenge code to generate signature cookies`，
+  拿不到签名就抛 `Fresh cookies (not necessarily logged in) are needed`。
+- **f2 / Evil0ctal** 走 `a_bogus`（JSVMP 混淆的签名算法），要额外跑一段 JS 或 Python 移植版，
+  算法一改版就得跟着逆向 —— 这是长期维护成本最高的那条路。
+
+小鲸鱼的选择是**让平台自己的页面去签名**：WebView 里页面本来就要调那几个接口，
+我们只在旁边读它写回 `window` 的数据（`_ROUTER_DATA` / `__pace_f`），
+**用户不需要提供任何 Cookie，也不需要跟着逆向签名算法**。
+代价是每个平台要单独摸清"数据落在哪个变量里"，这部分由 `lib/local/` 下各适配器承担。
+
+能借鉴的都借鉴了：多格式播放地址（`play_addr_h264` / `play_addr_bytevc1`）、
+按 id 精确挑作品（避免推荐流串数据）、以及"地址要先验证再交给下载器"这条纪律。
+
 ---
 
 ## 已知限制

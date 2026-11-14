@@ -168,6 +168,23 @@ class GenericLocalPlatform extends LocalPlatform {
   ''' + as + r'''
 
   // ---- 标题 ----
+  //
+  // 【v0.1.1 修正：`document.title` 往往只是站点名】
+  // 实测（2026-11，模拟器 + 真实页面）：
+  //   优酷   ->「高清完整正版视频在线观看-优酷」
+  //   爱奇艺 ->「爱奇艺-在线视频网站-海量正版高清视频在」
+  //   好看视频 ->「好看视频-轻松有收获」
+  // 这些都不是作品标题 —— 用户保存下来的文件名就是这句广告语。
+  // 现在的顺序：页面标题节点 → h1 → og:title → 描述 → document.title，
+  // 并且在每一步都检查「像不像站点标语」，像就继续往下找。
+  function metaOf(p) {
+    var el = document.querySelector('meta[property="' + p + '"]') ||
+             document.querySelector('meta[name="' + p + '"]');
+    return el ? String(el.getAttribute('content') || '').trim() : '';
+  }
+  // 站点标语的特征词（不是作品标题）
+  var SITE_NOISE = /(在线观看|海量正版|高清完整|官方网站|视频网站|轻松有收获|正版高清|免费在线|首页_|_首页)/;
+
   var title = '';
   if (typeof __ts !== 'undefined') {
     var te = document.querySelector(__ts);
@@ -177,7 +194,20 @@ class GenericLocalPlatform extends LocalPlatform {
     var h1 = document.querySelector('h1');
     if (h1) title = String(h1.textContent || '').trim();
   }
+  if (!title || SITE_NOISE.test(title)) {
+    var ogTitle = metaOf('og:title');
+    if (ogTitle && ogTitle.length >= 4) title = ogTitle;
+  }
+  if (!title || SITE_NOISE.test(title)) {
+    var desc = metaOf('description');
+    if (desc && desc.length >= 8) title = desc;
+  }
   if (!title) title = String(document.title || '').trim();
+
+  // 去掉尾部的「- 站点名」后缀（比整句当标题可读得多）
+  // 先 trim 再替换：`innerText` 常带尾随空白，`$` 锚点会因此匹配不上
+  title = title.trim();
+  title = title.replace(/\s*[-_|｜]\s*[^-_|｜]{1,12}\s*$/, '').trim();
   out.title = title.replace(/\s+/g, ' ').slice(0, 100);
 
   // ---- 作者 ----
