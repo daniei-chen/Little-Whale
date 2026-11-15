@@ -6,11 +6,11 @@
 library;
 
 /// 展示给用户的版本号，必须与 pubspec.yaml 的 `version:` 前半段一致
-const String kAppVersion = '0.3.2';
+const String kAppVersion = '0.3.3';
 
 /// 构建号，必须与 pubspec.yaml 的 `version:` 后半段一致（`0.0.9+9` 里的 9）。
 /// **更新判断只比这个数**，比字符串版本号可靠。
-const int kAppBuild = 17;
+const int kAppBuild = 18;
 
 /* ---------------------------------------------------------------------- */
 /* 更新检查                                                                */
@@ -39,10 +39,17 @@ const int kAppBuild = 17;
 // 与其静默失效，不如让人知道有新版。
 
 /// 更新清单主地址（jsDelivr 转发仓库内的 server/version.json，国内可直连）
+///
+/// 【为什么是 `@latest` 而不是 `@main`】实测（2026-11-15）：
+/// jsDelivr 对**分支**（`@main`）的缓存长达 12 小时，purge 接口也刷不掉 ——
+/// v0.3.2 发布后一小时，`@main` 仍返回 v0.3.0 的清单；
+/// 而 **tag / commit 是即时生效的**。`@latest` 会解析到最新 semver tag，
+/// 所以每次发版打 tag 之后，主源立刻就是新清单。
+/// 这条不是理论推演：这一版就是因为 `@main` 卡在旧清单才改的。
 const String kUpdateManifestUrl = String.fromEnvironment(
   'UPDATE_URL',
   defaultValue:
-      'https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json',
+      'https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@latest/server/version.json',
 );
 
 /// 更新清单备用地址（GitHub raw，无 CDN 缓存）。

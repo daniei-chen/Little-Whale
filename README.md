@@ -326,7 +326,7 @@ MediaMetadataRetriever 抽帧（8fps，OPTION_CLOSEST）
 App 内建自动检查，**不需要用户翻墙、也不需要自建服务器**：
 
 ```
-主清单  https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@main/server/version.json
+主清单  https://cdn.jsdelivr.net/gh/daniei-chen/Little-Whale@latest/server/version.json
 备用    https://raw.githubusercontent.com/daniei-chen/Little-Whale/main/server/version.json
 下载页  https://github.com/daniei-chen/Little-Whale/releases/latest
 ```
@@ -344,7 +344,7 @@ App 内建自动检查，**不需要用户翻墙、也不需要自建服务器**
 
 两个清单源互补：
 
-- **主源 jsDelivr** 国内可直连，但它有 CDN 缓存，发版后可能短时间返回旧清单
+- **主源 jsDelivr（@latest）** 国内可直连，指向最新**标签**。这里特意没用 @main —— 实测 jsDelivr 对分支的缓存长达 12 小时，purge 都刷不掉（v0.3.2 发版后一小时 @main 仍返回 v0.3.0 的清单），而 tag/commit 是即时的
 - **备用源 GitHub raw** 没有缓存，但国内时通时断
 
 所以 `UpdateService` 的策略是：主源没给出「有新版」时，再问一次备用源 ——
