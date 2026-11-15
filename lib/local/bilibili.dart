@@ -112,6 +112,24 @@ class BilibiliLocalPlatform extends LocalPlatform {
 
   /* ------------------------------------------------------------------ */
 
+  /// 用户粘的如果是「非内容页」，给出针对性解释。
+  static String? explainNonContentUrl(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('live.bilibili.com')) {
+      return '这是 **B站直播间**。\n\n直播是持续推流，没有「下载完成」这个状态，App 不支持保存直播。';
+    }
+    if (u.contains('space.bilibili.com')) {
+      return '这是 **B站用户空间**，不是单个作品。\n\n请在 App 里点开具体视频/专栏/动态，再复制链接。';
+    }
+    if (u.contains('/list/') || u.contains('favlist') || u.contains('/medialist/')) {
+      return '这是 **B站收藏夹/列表页**。\n\n收藏夹里每条要分别点开再复制链接。';
+    }
+    if (u.contains('/bangumi/') && !u.contains('/ep') && !u.contains('/ss')) {
+      return '这是 **B站番剧索引页**，不是单集。\n\n请点进具体一集（ep/ss 号）再复制链接。';
+    }
+    return null;
+  }
+
   @override
   Future<LocalResult> parse(String url) async {
     // 先拿设备指纹 —— 后面所有接口请求都带着它，能明显降低被风控的概率
@@ -137,6 +155,8 @@ class BilibiliLocalPlatform extends LocalPlatform {
     final bvid = _first(finalUrl, _bvidRe) ?? _first(url, _bvidRe);
     final aid = _first(finalUrl, _aidRe) ?? _first(url, _aidRe);
     if (bvid == null && aid == null) {
+      final explain = explainNonContentUrl(url);
+      if (explain != null) throw LocalParseError(explain);
       throw const LocalParseError(
           '没在链接里找到 B站的内容。支持视频（BV 号）、专栏（cv 号）、图文动态（opus）。');
     }

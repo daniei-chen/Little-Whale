@@ -30,6 +30,18 @@ class KuaishouLocalPlatform extends LocalPlatform {
 
   /* ------------------------------------------------------------------ */
 
+  /// 用户粘的如果是「非内容页」，给出针对性解释。
+  static String? explainNonContentUrl(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('live.kuaishou.com')) {
+      return '这是**快手直播间**。\n\n直播是持续推流，没有「下载完成」这个状态，App 不支持保存直播。';
+    }
+    if (u.contains('/profile/') || u.contains('kuaishou.com/u/')) {
+      return '这是**快手用户主页**，不是单个作品。\n\n请在 App 里点开具体那条作品，再「分享 → 复制链接」。';
+    }
+    return null;
+  }
+
   @override
   Future<LocalResult> parse(String url) async {
     final engine = LocalEngine.instance;
@@ -50,6 +62,8 @@ class KuaishouLocalPlatform extends LocalPlatform {
       }
 
       if (r == null) {
+        final explain = explainNonContentUrl(url);
+        if (explain != null) throw LocalParseError(explain);
         throw const LocalParseError(
             '快手这次没返回内容。可能是作品已删除，或这条分享链接已失效。');
       }

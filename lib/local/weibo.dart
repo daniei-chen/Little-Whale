@@ -39,11 +39,30 @@ class WeiboLocalPlatform extends LocalPlatform {
 
   /* ------------------------------------------------------------------ */
 
+  /// 用户粘的如果是「非内容页」，给出针对性解释。
+  static String? explainNonContentUrl(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('weibo.com/u/') ||
+        u.contains('weibo.com/n/') ||
+        u.contains('weibo.cn/u/')) {
+      return '这是 **微博用户主页**，不是单条微博。\n\n请在 App 里点开具体那条微博，再「分享 → 复制链接」。';
+    }
+    if (u.contains('weibo.com/p/') || u.contains('s.weibo.com')) {
+      return '这是**话题页 / 搜索页**，不是单条微博。\n\n请点进具体微博再复制链接。';
+    }
+    if (u.contains('/tv/') && !u.contains('/show/')) {
+      return '这是**微博视频列表页**，不是单个视频。\n\n请点开具体那条视频再复制链接。';
+    }
+    return null;
+  }
+
   @override
   Future<LocalResult> parse(String url) async {
     final finalUrl = await _resolve(url);
     final id = _extractId(finalUrl) ?? _extractId(url);
     if (id == null) {
+      final explain = explainNonContentUrl(url);
+      if (explain != null) throw LocalParseError(explain);
       throw const LocalParseError(
           '没在链接里找到微博 ID。请用微博「复制链接」给出的地址。');
     }
