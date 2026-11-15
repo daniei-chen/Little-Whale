@@ -1,5 +1,59 @@
 # 更新日志
 
+## v0.3.13 — 2026-11-15
+
+> 签名与 v0.1.x / v0.2.x / v0.3.x 相同，**可直接覆盖安装**。从 v0.0.9 及更早升级仍需先卸载。
+
+### 修掉一个会「静默丢图」的文件名 bug
+
+图文作品的每张图保存时叫 `标题_3`（`AppState.saveAllImages` 传的是 `'${r.title}_${i + 1}'`，这样「作品里的第几张」和相册里的编号能对上）。
+
+而文件名清理是**从尾部截断到 60 字符**：
+
+```dart
+if (s.length > 60) s = s.substring(0, 60);
+```
+
+**标题一长，`_3` 就被砍掉了** —— 于是 9 张图得到同一个名字，后存的覆盖先存的。用户看到「保存成功」，相册里只剩 1 张。
+
+这是个典型的**静默失败**：每次都返回 `saved=true`，功能测试全绿，只有相册里少了几张图才看得出来。
+
+### 修法
+
+截断时先认出尾部序号，把它接回去：
+
+```dart
+final m = RegExp(r'_(\d{1,3})$').firstMatch(s);
+if (m != null) {
+  final tail = m.group(0)!;              // `_12`
+  final keep = 60 - tail.length - 1;
+  s = '${s.substring(0, keep < 8 ? 8 : keep)}…$tail';
+} else {
+  s = s.substring(0, 60);
+}
+```
+
+顺带把扩展名清理扩到 `jpeg/png/webp/gif`（原来只认 `mp4/jpg`）。
+
+### 新增测试
+
+`test/filename_test.dart` —— **11 条**，其中最关键的是：
+
+```dart
+final names = {for (var i = 1; i <= 9; i++) svc.safeFileName('${long}_$i')};
+expect(names.length, 9, reason: '9 张图必须得到 9 个不同的文件名');
+```
+
+为此把 `_safeFileName` 改成 `safeFileName` 并标 `@visibleForTesting`。
+
+### 验证
+
+- `flutter analyze` 零问题
+- 单元测试 **182 → 193**
+- APK：`versionName=0.3.13` / `versionCode=28` / 纯 `arm64-v8a` / 19.8MB
+
+---
+
 ## v0.3.12 — 2026-11-15
 
 > 签名与 v0.1.x / v0.2.x / v0.3.x 相同，**可直接覆盖安装**。从 v0.0.9 及更早升级仍需先卸载。

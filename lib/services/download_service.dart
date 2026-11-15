@@ -290,7 +290,7 @@ class DownloadService {
     File? video;
     File? out;
     try {
-      final hint = _safeFileName(fileHint ?? 'live');
+      final hint = safeFileName(fileHint ?? 'live');
 
       // 1) 主图（封面）—— 上相册后就是那张「照片」
       cover = await _download(
@@ -364,7 +364,7 @@ class DownloadService {
     void Function(double)? onProgress,
   ) async {
     final dir = await getTemporaryDirectory();
-    final safeName = _safeFileName(
+    final safeName = safeFileName(
       nameFromServer.isNotEmpty ? nameFromServer : (fileHint ?? 'flashsave'),
     );
     // 先下到一个中性名字的临时文件：**扩展名要等拿到响应头才能定**
@@ -542,11 +542,37 @@ class DownloadService {
     return null;
   }
 
-  String _safeFileName(String raw) {
+  /// 清理文件名：去掉非法字符、去扩展名、按长度截断（**保住尾部序号**）。
+  ///
+  /// 标 @visibleForTesting 是因为这里的截断逻辑有真实坑：图文作品的每张图叫
+  /// 标题_3，从尾部硬截会把序号砍掉，导致多张图同名互相覆盖。
+  @visibleForTesting
+  String safeFileName(String raw) {
     var s = raw.replaceAll(RegExp(r'[\\/:*?"<>|\r\n\t]'), '_').trim();
-    if (s.length > 60) s = s.substring(0, 60);
-    if (s.toLowerCase().endsWith('.mp4') || s.toLowerCase().endsWith('.jpg')) {
+    final lower = s.toLowerCase();
+    if (lower.endsWith('.mp4') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.png') ||
+        lower.endsWith('.webp') ||
+        lower.endsWith('.gif')) {
       s = s.substring(0, s.lastIndexOf('.'));
+    }
+    // 【截断时必须保住尾部的序号】
+    // 图文作品的每张图叫 `标题_3` 这种（见 AppState.saveAllImages），
+    // 而这里原本是「从第 60 个字符直接砍断」—— 标题一长，`_3` 就被砍掉了，
+    // 于是 9 张图全变成同一个名字，后存的把先存的覆盖掉。
+    // 现在先认出尾部序号，截断时把它接回去（中间用省略号占位）。
+    if (s.length > 60) {
+      final m = RegExp(r'_(\d{1,3})$').firstMatch(s);
+      if (m != null) {
+        final tail = m.group(0)!; // 形如 `_12`
+        final keep = 60 - tail.length - 1;
+        final head = s.substring(0, keep < 8 ? 8 : keep);
+        s = '$head…$tail';
+      } else {
+        s = s.substring(0, 60);
+      }
     }
     return s.isEmpty ? 'flashsave_${DateTime.now().millisecondsSinceEpoch}' : s;
   }
