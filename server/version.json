@@ -1,8 +1,8 @@
 {
   "_说明": "小鲸鱼的更新清单 —— 这是 App 的【主源】。App 经 jsDelivr 转发读取本文件（国内可直连），备用源是 GitHub raw。每次发版都必须把 build / version / notes 同步到这里，否则用户收不到更新提示（v0.0.6~v0.0.8 就是因为没配源导致更新检测整体静默失效）。",
-  "build": 15,
-  "version": "0.3.0",
-  "notes": "本版签名与 v0.1.x / v0.2.x 相同，可直接覆盖安装（v0.0.9 及更早仍需先卸载）。\n\n【新增：HLS（m3u8）视频流】\nAcFun 这类站给的是「m3u8 播放列表 + 几十个 ts 分片」，不是能直接下载的视频文件。现在 App 能：解析播放列表（主/子流、加密、fMP4 都能识别）→ 顺序下载分片边下边拼 → 原生 MediaExtractor/MediaMuxer 转封装成 MP4（不重编码，画质零损失）→ 存进相册。\n新入口：直接粘贴 m3u8 直链（按 .m3u8 后缀识别）。\n\n【诚实的边界：AcFun 作品页仍拿不到】\nApp 出于安全整改，Manifest 里全量禁止明文（usesCleartextTraffic=false）。AcFun 的播放器要请求 http 子资源，被拦后播放器整个不初始化——实测 WebView 里轮询 30 秒 video 元素始终是 0，而桌面 Chrome 里有。要解决得放开明文或改 WebView 混合内容策略，两者都会削弱安全性，这一版没做这个取舍。\n\n【验证状态】m3u8 解析 12 条单测全过；Kotlin 转封装编译通过（宿主机 ffmpeg 做过等价验证）；Dart 下载链路代码就绪但未在设备跑通完整链路。\n\n说明：仅支持 arm64-v8a，Android 7.0 及以上。\n安全说明见仓库 docs/SECURITY.md。",
+  "build": 16,
+  "version": "0.3.1",
+  "notes": "本版签名与 v0.1.x / v0.2.x / v0.3.0 相同，可直接覆盖安装（v0.0.9 及更早仍需先卸载）。\n\n这一版没有新功能，只补验了 v0.3.0 里说「未验证」的那一环。\n\n【原生转封装已在真机验证通过】\n把宿主机 ffprobe 确认过的 TS（16.7MB / h264 1920x1072 / aac / 20.05 秒）推到设备，直接调 TsRemuxer：输出 15.8MB MP4 / 时长 19983ms / 视频轨 1 / 音频轨 1 / 文件头 ftyp。体积和时长都与宿主机 ffmpeg -c copy 的结果对得上。\n其中「音频轨 1」尤其关键——它证明 AAC 的 ADTS 头剥离和 csd-0 构造是对的，否则成品会「有音轨但没声」。\n\n【AcFun 那条路确认走不通】\n它的播放列表地址带一次性 pkey：hls_probe 内部拿到就 GET 是 200，同一个 URL 隔 1 秒再用 curl / node fetch / App 请求全是 403。加上隐藏 WebView 因明文被禁拿不到它，所以「AcFun 作品页 → MP4」在 App 侧做不了。这是环境事实，不是实现缺陷。\n\nHLS 能力本身仍然成立，对「公开可复用」的 m3u8 有效。\n\n说明：仅支持 arm64-v8a，Android 7.0 及以上。\n安全说明见仓库 docs/SECURITY.md。",
   "_url说明": "下载地址故意留空 —— 由 App 用构建时注入的 DOWNLOAD_PAGE 兜底（当前指向 GitHub Releases 最新版）。",
   "force": false
 }
