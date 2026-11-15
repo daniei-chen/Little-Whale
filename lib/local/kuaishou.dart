@@ -147,6 +147,9 @@ class KuaishouLocalPlatform extends LocalPlatform {
   ///
   /// 核心是 `<video>` 的 src —— 排除 `blob:`（MSE，不可下载）。
   /// 图集作品则从页面里的图片里挑（快手的图集会把原图挂在 img 上）。
+  /// **仅供测试**：把探针脚本交出去做 JS 语法检查（见 test/probe_js_test.dart）
+  static String debugProbeScript() => _probeScript;
+
   static const String _probeScript = r'''
 (function () {
   function good(u) {

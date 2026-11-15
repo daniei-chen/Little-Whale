@@ -171,6 +171,9 @@ class ZhihuLocalPlatform extends LocalPlatform {
 
   /// 直接从 DOM 抠 —— 比解析 6 万字节的 `js-initialData` 稳得多，
   /// 而且知乎的 JSON 结构改过好几版。
+  /// **仅供测试**：把探针脚本交出去做 JS 语法检查（见 test/probe_js_test.dart）
+  static String debugProbeScript([String id = '123456789']) => _probeScript(id);
+
   static String _probeScript(String id) => r'''
 (function () {
   var href = String(window.location.href);

@@ -866,6 +866,12 @@ class DouyinLocalPlatform extends LocalPlatform {
   /// 【为什么带缓存】
   /// 轮询每 350ms 执行一次，每次都重扫 600KB 太浪费。一旦"确认够用"就把
   /// 结果缓存到 `window.__fsDyCache`；导航到新文档时该变量自然消失，不会串数据。
+  /// **仅供测试**：把探针脚本交出去做 JS 语法检查（见 test/probe_js_test.dart）
+  static String debugProbeScript() => _probeScript;
+
+  /// **仅供测试**：同上，标题/作者修正脚本
+  static String debugMetaFixScript() => _metaFixScript;
+
   static const String _probeScript = r'''
 (function () {
   // 同一文档里已经拿到完整数据 → 直接返回，省掉每轮 600KB 的重扫

@@ -20,7 +20,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:flashsave/local/douyin.dart';
 import 'package:flashsave/local/generic.dart';
+import 'package:flashsave/local/kuaishou.dart';
+import 'package:flashsave/local/zhihu.dart';
 
 /// 造几个不同配置的通用平台，覆盖「有/无选择器」「有/无图片白名单」这些分支，
 /// 因为 debugScript() 里对它们是条件拼接的 —— 只测一种配置会漏掉另外几种。
@@ -102,8 +105,37 @@ void main() {
     }
   }, timeout: const Timeout(Duration(minutes: 2)));
 
-  test('Dart 变量注入不会把引号带进 JS（v0.3.8 的两次事故）', () async {
-    final p = GenericLocalPlatform(
+  test('三个 WebView 平台的探针脚本也必须是合法 JS', () async {
+    // 【为什么这六个平台里只有三个要测】小红书 / 微博 / B站 走的是 HTTP API，
+    // 不用 WebView 探针；抖音 / 快手 / 知乎的 JS 是内联在代码里的，
+    // 和通用适配器一样可能被拼错却没人发现。
+    if (!await _nodeAvailable()) {
+      markTestSkipped('宿主机没有 node，跳过 JS 语法检查');
+      return;
+    }
+
+    final scripts = <String, String>{
+      '抖音探针': DouyinLocalPlatform.debugProbeScript(),
+      '抖音标题修正': DouyinLocalPlatform.debugMetaFixScript(),
+      '快手探针': KuaishouLocalPlatform.debugProbeScript(),
+      '知乎探针': ZhihuLocalPlatform.debugProbeScript('28852607'),
+    };
+
+    for (final e in scripts.entries) {
+      final js = e.value;
+      expect(js.length, greaterThan(200), reason: '${e.key} 太短，可能没拼接完整');
+      expect(js.contains('(function'), isTrue, reason: '${e.key} 缺少 IIFE 开头');
+      expect(js.trimRight().endsWith('})()'), isTrue,
+          reason: '${e.key} 结尾不是 })()，可能被截断');
+
+      final f = File('${tmp.path}/${e.key}_probe.js');
+      await f.writeAsString(js);
+      final r = await Process.run('node', ['--check', f.path]);
+      expect(r.exitCode, 0, reason: '${e.key} 有 JS 语法错误：\n${r.stderr}');
+    }
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('Dart 变量注入不会把引号带进 JS（v0.3.8 的两次事故）', () async {    final p = GenericLocalPlatform(
       key: 'quoted',
       name: "带'单引号",
       hosts: const [],
