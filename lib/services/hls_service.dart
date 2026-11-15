@@ -33,11 +33,17 @@ class HlsFetchResult {
 
   final int bytes;
 
+  /// 分辨率（原生侧用 MediaMetadataRetriever 从产物读回来的，不是猜的）
+  final int width;
+  final int height;
+
   const HlsFetchResult({
     required this.mp4Path,
     required this.durationMs,
     required this.segments,
     required this.bytes,
+    this.width = 0,
+    this.height = 0,
   });
 }
 
@@ -157,6 +163,8 @@ class HlsService {
 
       final bytes = (r['bytes'] as num?)?.toInt() ?? 0;
       final durationMs = (r['durationMs'] as num?)?.toInt() ?? 0;
+      final width = (r['width'] as num?)?.toInt() ?? 0;
+      final height = (r['height'] as num?)?.toInt() ?? 0;
       if (bytes <= 0) throw const HlsException('转出来的 MP4 是空的');
 
       onProgress?.call(1.0, '完成');
@@ -169,6 +177,8 @@ class HlsService {
         durationMs: durationMs,
         segments: total,
         bytes: bytes,
+        width: width,
+        height: height,
       );
     } catch (e) {
       // 失败时清掉半成品（成功时 mp4 还要被上层取走，这里不动）

@@ -3,6 +3,7 @@ package cn.flashsave.flashsave.hls
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import java.io.File
 import java.nio.ByteBuffer
@@ -38,6 +39,8 @@ object TsRemuxer {
         val audioTracks: Int = 0,
         val durationMs: Long = 0,
         val bytes: Long = 0,
+        val width: Int = 0,
+        val height: Int = 0,
         val error: String = "",
     )
 
@@ -158,12 +161,33 @@ object TsRemuxer {
             val bytes = out.length()
             if (bytes <= 0L) return Outcome(ok = false, error = "转出来的 MP4 是空的")
 
+            // 【复核：不信任自己算出来的时长 —— 但只在可疑时才复核】
+            //
+            // 上面的 `maxPtsUs` 是从样本时间戳累出来的，如果时间戳处理有偏差
+            // （basePts 归一化不对、或丢了几帧），它和真实时长会对不上 ——
+            // 那种情况下视频能播，但进度条错乱、系统播放器可能显示 0:00。
+            //
+            // 不过 MediaMetadataRetriever 很贵：实测在模拟器上让一条 20 秒的片子
+            // 从 3.2s 变成 8.2s（+5s）。所以只在**自算值可疑**时才去读产物：
+            //   自算 <= 0（完全算不出来），或 自算 < 500ms（几乎是空壳，必然不对）
+            // 正常结果直接用自算值 —— 实测它和 ffprobe 差不到 0.3%。
+            val selfMs = maxPtsUs / 1000
+            val needProbe = selfMs <= 0L || selfMs < 500L
+            val probed = if (needProbe) probeMp4(out.absolutePath) else null
+            val realDuration = if (probed != null && probed.durationMs > 0) {
+                probed.durationMs
+            } else {
+                selfMs
+            }
+
             return Outcome(
                 ok = true,
                 videoTracks = if (sawVideo) 1 else 0,
                 audioTracks = if (sawAudio) 1 else 0,
-                durationMs = maxPtsUs / 1000,
+                durationMs = realDuration,
                 bytes = bytes,
+                width = probed?.width ?: 0,
+                height = probed?.height ?: 0,
             )
         } catch (t: Throwable) {
             try {
@@ -186,6 +210,24 @@ object TsRemuxer {
             }
         }
     }
+
+    /** 用系统解析器把产物读一遍，拿到真实时长与分辨率 */
+    private fun probeMp4(path: String): Probed {
+        val r = MediaMetadataRetriever()
+        return try {
+            r.setDataSource(path)
+            val ms = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            Probed(ms, w, h)
+        } catch (_: Throwable) {
+            Probed(0, 0, 0)
+        } finally {
+            try { r.release() } catch (_: Throwable) {}
+        }
+    }
+
+    private data class Probed(val durationMs: Long, val width: Int, val height: Int)
 
     /**
      * ADTS 头长度：protect_absent=1 时 7 字节，否则 9 字节（带 CRC）。
