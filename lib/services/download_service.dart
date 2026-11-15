@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:gal/gal.dart';
+
+import 'hls_service.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'gif_service.dart';
@@ -109,14 +111,40 @@ class DownloadService {
     File? tmp;
 
     if (target == null) {
-      // ---- 路径 0：本地解析模式 ----
-      // 传进来的**就是平台原始直链**（不是 /media 代理地址），
-      // 所以必须用调用方给的 Referer —— 各平台 CDN 都有防盗链，
-      // 不带 Referer 会直接 403。
-      try {
-        tmp = await _download(proxyUrl, referer, fileHint, '', isVideo, onProgress);
-      } catch (e) {
-        return DownloadOutcome(saved: false, message: _friendlyError(e));
+      // ---- 路径 0a：HLS（m3u8 播放列表）----
+      //
+      // 【为什么放在这里而不是单开一个方法】对调用方来说，"保存一个 m3u8"
+      // 和"保存一个 mp4 直链"是同一件事：给地址、看进度、拿到相册里的成品。
+      // HLS 只是内部多两步（下分片、转封装），产物仍是 mp4。
+      //
+      // 【代价要提前说】一条 40 秒的 1080P 流有 40 多个分片（实测 AcFun 约 160MB），
+      // 下载 + 转封装在模拟器上要 1~2 分钟，比普通直链慢一个量级。
+      if (proxyUrl.contains('.m3u8')) {
+        try {
+          final r = await HlsService.fetch(
+            m3u8Url: proxyUrl,
+            referer: referer,
+            onProgress: (p, note) {
+              // 内部 0..1，留最后 10% 给"写进相册"
+              onProgress?.call(p * 0.9);
+            },
+          );
+          tmp = File(r.mp4Path);
+        } on HlsException catch (e) {
+          return DownloadOutcome(saved: false, message: e.message);
+        } catch (e) {
+          return DownloadOutcome(saved: false, message: 'HLS 视频处理失败：$e');
+        }
+      } else {
+        // ---- 路径 0b：普通直链 ----
+        // 传进来的**就是平台原始直链**（不是 /media 代理地址），
+        // 所以必须用调用方给的 Referer —— 各平台 CDN 都有防盗链，
+        // 不带 Referer 会直接 403。
+        try {
+          tmp = await _download(proxyUrl, referer, fileHint, '', isVideo, onProgress);
+        } catch (e) {
+          return DownloadOutcome(saved: false, message: _friendlyError(e));
+        }
       }
     } else {
       // ---- 路径 1：直连平台 CDN（服务器模式下可选，省服务器流量）----

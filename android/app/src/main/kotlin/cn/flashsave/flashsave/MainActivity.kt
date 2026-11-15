@@ -3,6 +3,7 @@ package cn.flashsave.flashsave
 import android.os.Handler
 import android.os.Looper
 import cn.flashsave.flashsave.gif.VideoToGif
+import cn.flashsave.flashsave.hls.TsRemuxer
 import cn.flashsave.flashsave.motionphoto.MotionPhotoWriter
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -50,9 +51,42 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "videoToGif" -> handleVideoToGif(call, result)
                     "makeMotionPhoto" -> handleMakeMotionPhoto(call, result)
+                    "remuxTs" -> handleRemuxTs(call, result)
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * HLS 转封装：拼接好的 MPEG-TS → MP4（只换容器，不重编码）。
+     *
+     * 走同一个单线程队列 —— 转封装本身很快，但它会读几百 MB 的临时文件，
+     * 和转 GIF / 合成动态照片并行会抢 IO。
+     */
+    private fun handleRemuxTs(call: MethodCall, result: MethodChannel.Result) {
+        val tsPath = call.argument<String>("tsPath")
+        val outPath = call.argument<String>("outPath")
+        if (tsPath.isNullOrEmpty() || outPath.isNullOrEmpty()) {
+            result.error("E_ARG", "tsPath / outPath 不能为空", null)
+            return
+        }
+        mediaWorker.execute {
+            val outcome = TsRemuxer.remux(tsPath, outPath)
+            mainHandler.post {
+                if (outcome.ok) {
+                    result.success(
+                        mapOf(
+                            "bytes" to outcome.bytes,
+                            "durationMs" to outcome.durationMs,
+                            "videoTracks" to outcome.videoTracks,
+                            "audioTracks" to outcome.audioTracks,
+                        )
+                    )
+                } else {
+                    result.error("E_REMUX", outcome.error, null)
+                }
+            }
+        }
     }
 
     private fun handleVideoToGif(call: MethodCall, result: MethodChannel.Result) {

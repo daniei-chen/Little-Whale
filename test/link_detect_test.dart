@@ -78,6 +78,12 @@ const _shouldMatch = <String, String>{
   'https://share.izuiyou.com/hybrid/zhi/detail?id=123': 'izuiyou',
   'https://www.miaopai.com/show/abc123.htm': 'miaopai',
   'https://m.miaopai.com/show/abc123.htm': 'miaopai',
+
+  // ---- v0.3.0：HLS 播放列表（没有固定域名，按 .m3u8 后缀识别）----
+  'https://example.com/video/index.m3u8': 'hls',
+  'https://cdn.example.com/a/b/playlist.M3U8?token=x': 'hls',
+  // 即便域名属于别的平台，只要后缀是 .m3u8 就该归 HLS（它是播放列表不是作品页）
+  'https://tx-safety-video.acfun.cn/mediacloud/acfun/video-hls_1080p.m3u8?pkey=abc': 'hls',
 };
 
 /// 不应该被识别的链接
@@ -152,6 +158,8 @@ void main() {
 
     test('每个平台的 hosts 都不为空（否则永远识别不到）', () {
       for (final p in LocalRegistry.all) {
+        // hls 是例外：它没有固定域名，由 detect() 按 `.m3u8` 后缀单独识别
+        if (p.key == 'hls') continue;
         expect(p.hosts, isNotEmpty, reason: '${p.name} 没有配置 hosts');
       }
     });

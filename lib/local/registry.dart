@@ -1,6 +1,7 @@
 import 'bilibili.dart';
 import 'douyin.dart';
 import 'generic.dart';
+import 'hls_platform.dart';
 import 'kuaishou.dart';
 import 'types.dart';
 import 'weibo.dart';
@@ -162,12 +163,22 @@ class LocalRegistry {
       hosts: const ['miaopai.com'],
       referer: 'https://www.miaopai.com/',
     ),
+
+    // ---- ④ HLS 播放列表（没有固定域名，按 .m3u8 后缀识别）----
+    //
+    // AcFun 那类站在隐藏 WebView 里拿不到 `<video>`（明文被禁，播放器不初始化），
+    // 所以把 m3u8 直链本身做成一等公民：用户从别处拿到播放列表地址就能存。
+    HlsLocalPlatform(),
   ];
 
   /// 按 URL 找平台，找不到返回 null
   static LocalPlatform? detect(String? url) {
     if (url == null || url.isEmpty) return null;
     final lower = url.toLowerCase();
+    // m3u8 直链没有固定域名，按后缀识别。
+    // **必须在域名匹配之前判断** —— 否则像 `...douyinpic.com/x.m3u8`
+    // 这种会被域名规则抢先归到抖音，然后按图片/作品去解析，必然失败。
+    if (lower.contains('.m3u8')) return HlsLocalPlatform();
     for (final p in all) {
       for (final h in p.hosts) {
         if (lower.contains(h)) return p;

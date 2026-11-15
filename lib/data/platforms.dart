@@ -173,6 +173,13 @@ const kPlatforms = <PlatformMeta>[
     color: Color(0xFF00C1DE), soft: Color(0x1200C1DE),
     hosts: ['miaopai.com'], keywords: ['秒拍', 'miaopai'],
   ),
+  // hls 没有固定域名：由 LocalRegistry 按 `.m3u8` 后缀识别。
+  // 这里 hosts/keywords 故意留空 —— 填了反而会把正文里的 "hls" 误判成平台。
+  PlatformMeta(
+    key: 'hls', name: 'HLS 视频流', short: 'H',
+    color: Color(0xFF7C4DFF), soft: Color(0x127C4DFF),
+    hosts: [], keywords: [],
+  ),
 ];
 
 /// 从一段分享文案里抓出第一个可用的链接。
