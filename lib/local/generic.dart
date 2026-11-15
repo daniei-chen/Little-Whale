@@ -80,6 +80,17 @@ class GenericLocalPlatform extends LocalPlatform {
   /// 等不到再按 HLS/没有内容来解释。
   final bool expectVideo;
 
+  /// **仅供测试**：把生成的探针脚本交出去。
+  ///
+  /// 【为什么需要它】`_script` 是把 6 段 `r'''…'''` 和若干 Dart 变量拼起来的，
+  /// 拼接错了（漏引号、多前缀）在 Dart 侧完全看不出来 —— `flutter analyze` 全绿，
+  /// 只有真机上执行时才发现「13 个平台全线失败」。
+  /// v0.3.8 就是这么踩了两次坑。
+  ///
+  /// 有了这个入口，`test/probe_js_test.dart` 可以在桌面阶段把脚本喂给
+  /// `node --check`，语法错当场红，不用等设备端一个个平台失败。
+  String debugScript() => _script;
+
   @override
   Future<LocalResult> parse(String url) async {
     final engine = LocalEngine.instance;
@@ -210,13 +221,16 @@ class GenericLocalPlatform extends LocalPlatform {
 
   String get _script {
     final allow = (imageAllow ?? const <String>[]).map((e) => "'$e'").join(',');
-    final vs = videoSelector == null ? '' : "var __vs = '$videoSelector';";
-    final ts = titleSelector == null ? '' : "var __ts = '$titleSelector';";
+    // 【注入 JS 单引号字符串前必须清理】一个带 `'` 的选择器会把整段脚本文本撑破 ——
+    // 和 v0.3.8 的 `__sn` 事故是同一类问题，只是发生在配置项上。
+    String jsStr(String? v) => (v ?? '').replaceAll(RegExp('["\'\\\\]'), '');
+    final vs = videoSelector == null ? '' : "var __vs = '${jsStr(videoSelector)}';";
+    final ts = titleSelector == null ? '' : "var __ts = '${jsStr(titleSelector)}';";
     // 平台展示名（用于「标题全是站点名」时生成中性占位，如「微视视频」）。
     // 必须像 __ts 一样自己带引号 —— 上一版我写成了 `''' + name + r'''`，
     // raw 字符串不会补引号，生成出来是 `var __sn = 微视;`，整个探针脚本直接语法错误。
     final sn = "var __sn = '${name.replaceAll(RegExp(r"['\\]"), '')}';";
-    final as = authorSelector == null ? '' : "var __as = '$authorSelector';";
+    final as = authorSelector == null ? '' : "var __as = '${jsStr(authorSelector)}';";
 
     return r'''
 (function () {
