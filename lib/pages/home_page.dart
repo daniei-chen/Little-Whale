@@ -79,6 +79,20 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// 混合内容（视频 + 多图）时「只存图片」的入口。
+  ///
+  /// 微博允许一条内容同时带视频和多图，而 `saveCurrent()` 在视频存在时
+  /// 只会存视频 —— 那几张图就永远存不到。这条路径绕开视频，直接走图片。
+  Future<void> _onSaveImages() async {
+    final s = AppState.instance;
+    if (s.result == null) return;
+    final outcome = await s.saveAllImages();
+    if (!mounted) return;
+    _toast(outcome.saved
+        ? (outcome.message.isNotEmpty ? outcome.message : '图片已保存')
+        : (outcome.message.isNotEmpty ? outcome.message : '保存失败'));
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -113,6 +127,7 @@ class _HomePageState extends State<HomePage> {
                             result: s.result!,
                             onReplay: s.parse,
                             onSave: _onSave,
+      onSaveImages: _onSaveImages,
                             onCopyTitle: () async {
                               await s.copyTitle();
                               _toast('标题已复制');
@@ -481,6 +496,7 @@ class _ResultCard extends StatelessWidget {
     required this.result,
     required this.onReplay,
     required this.onSave,
+    required this.onSaveImages,
     required this.onCopyTitle,
     required this.onCopyLink,
     required this.onImageTap,
@@ -489,6 +505,10 @@ class _ResultCard extends StatelessWidget {
   final ParseResult result;
   final VoidCallback onReplay;
   final VoidCallback onSave;
+
+  /// 混合内容（视频 + 多图）时单独存图片用。
+  /// 微博允许一条内容同时带视频和多图，那时底部会出现两个按钮。
+  final VoidCallback onSaveImages;
   final VoidCallback onCopyTitle;
   final VoidCallback onCopyLink;
   final ValueChanged<int> onImageTap;
@@ -593,19 +613,40 @@ class _ResultCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 10),
-          PrimaryButton(
-            label: result.isImages
-                ? (AppState.instance.pickedCount == 0
-                    ? '请先勾选要保存的图片'
-                    : '保存选中的 ${AppState.instance.pickedCount} 张图')
-                : '保存到相册',
-            showArrow: false,
-            height: 44,
-            // 一张都没勾时按钮不可点，避免点了没反应还以为是坏了
-            onTap: result.isImages && AppState.instance.pickedCount == 0
-                ? null
-                : onSave,
-          ),
+          if (result.isVideo && result.images.isNotEmpty) ...[
+            // 【混合内容：视频 + 多图】微博允许一条内容同时带两者，
+            // 以前 `saveCurrent()` 只认视频，图片那张区展示了却存不了。
+            // 现在给两个按钮，用户想存哪边就存哪边。
+            PrimaryButton(
+              label: '保存视频',
+              showArrow: false,
+              height: 44,
+              onTap: onSave,
+            ),
+            const SizedBox(height: 8),
+            PrimaryButton(
+              label: AppState.instance.pickedCount == 0
+                  ? '请先勾选要保存的图片'
+                  : '保存选中的 ${AppState.instance.pickedCount} 张图',
+              showArrow: false,
+              height: 44,
+              onTap: AppState.instance.pickedCount == 0 ? null : onSaveImages,
+            ),
+          ] else
+            PrimaryButton(
+              label: result.images.isNotEmpty
+                  ? (AppState.instance.pickedCount == 0
+                      ? '请先勾选要保存的图片'
+                      : '保存选中的 ${AppState.instance.pickedCount} 张图')
+                  : '保存到相册',
+              showArrow: false,
+              height: 44,
+              // 一张都没勾时按钮不可点，避免点了没反应还以为是坏了
+              onTap:
+                  result.images.isNotEmpty && AppState.instance.pickedCount == 0
+                      ? null
+                      : onSave,
+            ),
           const SizedBox(height: 7),
           Row(
             children: [
