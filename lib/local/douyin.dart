@@ -49,7 +49,10 @@ class DouyinLocalPlatform extends LocalPlatform {
   List<String> get hosts => const [
         'douyin.com',
         'iesdouyin.com',
-        'douyinpic.com',
+        // 【不要在这里加 douyinpic.com】那是**图片 CDN**，不是作品页。
+        // 加进来的后果：用户粘贴一张抖音图片的地址，App 会说「识别到抖音链接」
+        // 然后解析失败 —— 比干脆说「这不是作品链接」更糟。
+        // 图片域名在 DouyinParser.isDouyinImageHost 里单独判断。
       ];
 
   @override

@@ -34,7 +34,8 @@ const kPlatforms = <PlatformMeta>[
     short: '抖',
     color: Color(0xFF161823),
     soft: Color(0x12161823), // rgba(22,24,35,.07)
-    hosts: ['v.douyin.com', 'www.iesdouyin.com', 'iesdouyin.com', 'douyin.com', 'douyin'],
+    // 【不能写裸词 'douyin'】hosts 是子串匹配，裸词会把 douyinpic.com / douyin.com.evil 之类全吞进来。
+    hosts: ['v.douyin.com', 'www.iesdouyin.com', 'iesdouyin.com', 'douyin.com'],
     keywords: ['抖音', 'dou音'],
   ),
   PlatformMeta(
@@ -150,6 +151,27 @@ const kPlatforms = <PlatformMeta>[
     key: 'douyu', name: '斗鱼', short: '斗',
     color: Color(0xFFFF5D23), soft: Color(0x12FF5D23),
     hosts: ['douyu.com'], keywords: ['斗鱼', 'douyu'],
+  ),
+  // ---- v0.2.0 新增（与 lib/local/registry.dart 一一对应，有一致性测试守着）----
+  PlatformMeta(
+    key: 'acfun', name: 'AcFun', short: 'A',
+    color: Color(0xFFFD4C5B), soft: Color(0x12FD4C5B),
+    hosts: ['acfun.cn'], keywords: ['acfun', 'a站'],
+  ),
+  PlatformMeta(
+    key: 'pipix', name: '皮皮虾', short: '皮',
+    color: Color(0xFFF5A623), soft: Color(0x12F5A623),
+    hosts: ['pipix.com'], keywords: ['皮皮虾', 'pipix'],
+  ),
+  PlatformMeta(
+    key: 'izuiyou', name: '最右', short: '右',
+    color: Color(0xFFFF6B35), soft: Color(0x12FF6B35),
+    hosts: ['izuiyou.com'], keywords: ['最右', 'izuiyou'],
+  ),
+  PlatformMeta(
+    key: 'miaopai', name: '秒拍', short: '秒',
+    color: Color(0xFF00C1DE), soft: Color(0x1200C1DE),
+    hosts: ['miaopai.com'], keywords: ['秒拍', 'miaopai'],
   ),
 ];
 

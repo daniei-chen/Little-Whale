@@ -118,6 +118,44 @@ class LocalRegistry {
       hosts: const ['douyu.com'],
       referer: 'https://www.douyu.com/',
     ),
+
+    // ---- ③ v0.2.0 新增：短视频 / 弹幕站 ----
+    //
+    // 【为什么用通用适配器而不是专用适配器】
+    // 专用适配器要逐个逆向（数据落在哪个 window 变量、哪个 DOM 容器），
+    // 每加一个都是几天工作量 + 持续维护。这四家目前的量级还不够，
+    // 先用通用适配器把「能识别、能渲染、能取到 <video> / <img>」走通 ——
+    // 用户在 App 里能直接用，我们也能从真实反馈判断值不值得做专用。
+    // 通用适配器的已知边界（拿不到无水印原图、识别不了动图）同样适用。
+    GenericLocalPlatform(
+      key: 'acfun',
+      name: 'AcFun',
+      hosts: const ['acfun.cn'],
+      referer: 'https://www.acfun.cn/',
+      // 实测（2026-11，真实作品页 ac41234567）：播放器给的是
+      // ...-hls_1080p_h264_60_1.m3u8，是分段流不是文件。
+      failHint: 'AcFun 的视频是 HLS 流式格式（m3u8 分段流），App 暂不支持直接保存。',
+    ),
+    GenericLocalPlatform(
+      key: 'pipix',
+      name: '皮皮虾',
+      hosts: const ['pipix.com'],
+      referer: 'https://h5.pipix.com/',
+      // 实测：h5.pipix.com 是 APP 下载落地页，没有作品内容
+      failHint: '皮皮虾的网页版是 APP 下载引导页，作品内容只在 App 里。',
+    ),
+    GenericLocalPlatform(
+      key: 'izuiyou',
+      name: '最右',
+      hosts: const ['izuiyou.com'],
+      referer: 'https://www.izuiyou.com/',
+    ),
+    GenericLocalPlatform(
+      key: 'miaopai',
+      name: '秒拍',
+      hosts: const ['miaopai.com'],
+      referer: 'https://www.miaopai.com/',
+    ),
   ];
 
   /// 按 URL 找平台，找不到返回 null

@@ -32,6 +32,7 @@ class GenericLocalPlatform extends LocalPlatform {
     this.authorSelector,
     this.settle = const Duration(milliseconds: 900),
     this.timeout = const Duration(seconds: 16),
+    this.failHint = '',
   });
 
   @override
@@ -62,6 +63,14 @@ class GenericLocalPlatform extends LocalPlatform {
   final Duration settle;
   final Duration timeout;
 
+  /// 解析失败时追加的「这个平台特有的原因」。
+  ///
+  /// 通用适配器对任何站点都是同一套提取逻辑，但不同站点的失败原因差别很大：
+  /// AcFun 给的是 HLS 流，皮皮虾的移动站直接是 APP 落地页。
+  /// 空着的话用户只会看到「没有找到可下载的视频或图片」——
+  /// 既不知道是谁的问题，也不知道该不该再试。
+  final String failHint;
+
   @override
   Future<LocalResult> parse(String url) async {
     final engine = LocalEngine.instance;
@@ -78,6 +87,7 @@ class GenericLocalPlatform extends LocalPlatform {
     // 而不是让他等 16 秒。
     var lastKey = '';
     var stable = 0;
+    final t0 = DateTime.now();
 
     final r = await engine.evaluatePolling(
       url,
@@ -91,9 +101,19 @@ class GenericLocalPlatform extends LocalPlatform {
         final imgs = v['images'];
         final n = imgs is List ? imgs.length : 0;
 
-        // 有视频就够（视频是强信号，不用再等）
+        // 有可下载的视频地址就够（最强信号，不用再等）
         if (video.isNotEmpty) return true;
-        // 图够多也是强信号
+
+        // 【有播放器但还没拿到地址 → 再等一小会儿】
+        // 实测（AcFun 作品页）：播放器起来之前，页面已经有 11 张缩略图
+        // （封面 + 推荐位），旧逻辑「图 ≥ 2 就收工」会把它判成「图文 11 张」，
+        // 用户点保存会存下一堆不相干的缩略图。
+        // 现在：只要页面上有 <video> 元素，就说明这是视频页，给它 2.5 秒把地址挂上来。
+        if (v['hasVideoEl'] == true) {
+          return DateTime.now().difference(t0) > const Duration(milliseconds: 2500);
+        }
+
+        // 完全没有播放器 → 图够多就是图文作品
         if (n >= 2) return true;
 
         // 弱信号：数量连续 4 轮没变（约 1.2 秒）就收工
@@ -128,10 +148,19 @@ class GenericLocalPlatform extends LocalPlatform {
       }
     }
 
+    // 【流式视频优先判定】页面只有 m3u8 时，那些 <img> 多半是封面、推荐位缩略图。
+    // 实测 AcFun 作品页：videoUrl 为空、images 抓到 11 张（全是缩略图），
+    // 于是被判成「图文 11 张」—— 用户点保存会存下一堆不相干的图。
+    // 明确说「不支持保存这个流」比给一堆垃圾强。
+    if (videoUrl.isEmpty && r['hlsOnly'] == true) {
+      throw LocalParseError(
+          '$name 这条视频是 HLS 流式格式（m3u8 分段流），App 暂不支持直接保存。\n\n'
+          '不是链接的问题 —— 平台把视频切成了几百个小片段，保存下来也不是能直接播放的文件。');
+    }
     if (videoUrl.isEmpty && images.isEmpty) {
       throw LocalParseError(
           '$name 这条内容里没有找到可下载的视频或图片。\n\n'
-          '可能是链接类型不支持（比如首页/列表页），或者页面结构变了。');
+          '${failHint.isNotEmpty ? failHint : '可能是链接类型不支持（比如首页/列表页），或者页面结构变了。'}');
     }
 
     final title = (r['title'] ?? '').toString();
@@ -207,6 +236,23 @@ class GenericLocalPlatform extends LocalPlatform {
   // 去掉尾部的「- 站点名」后缀（比整句当标题可读得多）
   // 先 trim 再替换：`innerText` 常带尾随空白，`$` 锚点会因此匹配不上
   title = title.trim();
+
+  // 【AcFun 这类站会把 SEO 关键词拼进标题】
+  // 实测（2026-11）：`喀山冰演run the girls,,null,A站,AcFun,ACG,弹幕,视频,动画,…`
+  // —— 标题本身是对的，后面接了一长串站点关键词和一个字面量的 "null"。
+  // 判据：逗号 ≥ 4 段且含站点关键词 → 只留第一段（正常作品标题不会有这种形态）。
+  if (title.split(',').length >= 5 &&
+      /(acfun|A站|弹幕|鬼畜|新番|二次元|ACG|秒拍|最右|皮皮虾)/i.test(title)) {
+    title = title.split(',')[0].trim();
+  }
+  // 顺手清掉悬挂的 `null` 与连续逗号（不是所有站都会走上面那条分支）
+  title = title.replace(/,{2,}/g, ',').replace(/,?\bnull\b,?/gi, ',').trim();
+  title = title.replace(/^[,\s]+|[,\s]+$/g, '');
+  // 兜底：仍然超长且逗号很多 → 取第一段（宁可短，也不要半屏垃圾）
+  if (title.length > 80 && title.indexOf(',') > 10) {
+    title = title.split(',')[0].trim();
+  }
+
   title = title.replace(/\s*[-_|｜]\s*[^-_|｜]{1,12}\s*$/, '').trim();
   out.title = title.replace(/\s+/g, ' ').slice(0, 100);
 
@@ -219,7 +265,13 @@ class GenericLocalPlatform extends LocalPlatform {
   out.author = author.slice(0, 40);
 
   // ---- 视频：找 <video>，排除 blob:/data:（那些是 MSE，下不了）----
+  //
+  // 【还必须排除 m3u8】实测（2026-11，AcFun 作品页）`<video>` 的 src 是
+  // `https://tx-safety-video.acfun.cn/.../xxx-hls_1080p_h264_60_1.m3u8` ——
+  // 那是一份**播放列表文本**，不是视频文件。直接下载会得到一个几 KB 的文本，
+  // 相册打不开，用户却以为存成功了。宁可明确说「这是流式视频，暂不支持」。
   var videoUrl = '';
+  var sawHls = false;
   var vs = typeof __vs !== 'undefined'
       ? document.querySelectorAll(__vs)
       : document.querySelectorAll('video');
@@ -228,6 +280,7 @@ class GenericLocalPlatform extends LocalPlatform {
     var s = v.currentSrc || v.src || '';
     if (!s || s.indexOf('blob:') === 0 || s.indexOf('data:') === 0) continue;
     if (s.indexOf('http') !== 0) continue;
+    if (s.indexOf('.m3u8') > -1 || s.indexOf('mime_type=m3u8') > -1) { sawHls = true; continue; }
     videoUrl = s;
     out.cover = String(v.poster || '');
   }
@@ -236,10 +289,15 @@ class GenericLocalPlatform extends LocalPlatform {
     var ss = document.querySelectorAll('video source');
     for (var j = 0; j < ss.length && !videoUrl; j++) {
       var s2 = ss[j].src || '';
-      if (s2.indexOf('http') === 0) videoUrl = s2;
+      if (s2.indexOf('http') !== 0) continue;
+      if (s2.indexOf('.m3u8') > -1) { sawHls = true; continue; }
+      videoUrl = s2;
     }
   }
   out.videoUrl = videoUrl;
+  out.hlsOnly = !videoUrl && sawHls;
+  // 「页面上有没有播放器」—— 轮询靠它区分「这是视频页，再等等」和「这就是图文」
+  out.hasVideoEl = vs.length > 0;
 
   // ---- 图片：只留「够大」的，过滤图标/头像/表情 ----
   var seen = {}, imgs = [];

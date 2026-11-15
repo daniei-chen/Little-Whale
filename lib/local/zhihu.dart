@@ -21,7 +21,9 @@ class ZhihuLocalPlatform extends LocalPlatform {
   String get name => '知乎';
 
   @override
-  List<String> get hosts => const ['zhihu.com', 'zhimg.com'];
+  // 【zhimg.com 不进 hosts】那是正文图床（pic1/pic2.zhimg.com），
+  // 粘一张图进来不该被当成知乎作品页。图床判断在提取脚本里单独做。
+  List<String> get hosts => const ['zhihu.com'];
 
   @override
   String get referer => 'https://www.zhihu.com/';
