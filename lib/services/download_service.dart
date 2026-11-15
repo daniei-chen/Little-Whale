@@ -239,6 +239,16 @@ class DownloadService {
       if (!await gif.exists() || await gif.length() <= 0) {
         return const DownloadOutcome(saved: false, message: '生成的 GIF 是空的');
       }
+      // 【不只看"非空"，还要看文件头】转码器可能写出一个「有几 KB、但不是 GIF」的
+      // 半成品（进程被掐、编码器内部报错但没抛异常都可能）。这种文件存进相册
+      // 就是一张打不开的破图，而用户看到的是「已存为 GIF」。
+      final gifExt = await _extFromMagic(gif);
+      if (gifExt != '.gif') {
+        return DownloadOutcome(
+          saved: false,
+          message: '生成的 GIF 不完整（文件头是 ${gifExt ?? '未知格式'}），请重试',
+        );
+      }
 
       // 3) 存相册 —— gal 按文件扩展名走 IMAGE_URI，.gif 会正确归为图片
       await Gal.putImage(gif.path, album: album);
@@ -332,6 +342,22 @@ class DownloadService {
       out = File(outPath);
       if (!await out.exists() || await out.length() <= 0) {
         return const DownloadOutcome(saved: false, message: '合成的动态照片是空的');
+      }
+      // 【不能只看"非空"】这个产物的价值全在「两张皮」上：
+      //   · 前面的 JPEG —— 相册把它当照片
+      //   · 后面追加的 MP4 —— 长按才会动
+      // 只要合成中途出了岔子，很容易得到一个「能打开、但只是张普通照片」的
+      // 半成品。用户看到「已存为动态照片」，实际上永远等不到那个动效。
+      // 所以这里把两段都验一遍。
+      final jpegOk = await _startsWithJpeg(out);
+      if (!jpegOk) {
+        return const DownloadOutcome(
+            saved: false, message: '合成的动态照片文件头不是 JPEG，请重试');
+      }
+      if (!await _hasAppendedMp4(out)) {
+        return const DownloadOutcome(
+            saved: false,
+            message: '动态照片里没有视频段 —— 存进去只会是一张普通照片');
       }
 
       // 4) 存相册 —— .jpg 走 IMAGE_URI，系统扫描后才可能标成动态照片
@@ -500,6 +526,51 @@ class DownloadService {
       return extFromMagicBytes(head);
     } catch (_) {
       return null;
+    }
+  }
+
+  /// 文件是不是以 JPEG 的 SOI 标记（FF D8）开头。
+  Future<bool> _startsWithJpeg(File f) async {
+    try {
+      final raf = await f.open();
+      final head = await raf.read(2);
+      await raf.close();
+      return head.length == 2 && head[0] == 0xFF && head[1] == 0xD8;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 动态照片末尾是否真的追加了 MP4 段。
+  ///
+  /// 判据：从尾部往前 4MB 范围内能找到 ISO BMFF 的 `ftyp` 盒。
+  /// 【为什么限定尾部】JPEG 前面就是主图，`ftyp` 只可能出现在追加的视频段里；
+  /// 限定范围避免把「封面里恰好有这些字节」误判成有视频。
+  Future<bool> _hasAppendedMp4(File f) async {
+    RandomAccessFile? raf;
+    try {
+      raf = await f.open();
+      final len = await raf.length();
+      if (len < 16) return false;
+      const window = 4 * 1024 * 1024;
+      final start = len > window ? len - window : 0;
+      await raf.setPosition(start);
+      final tail = await raf.read(len - start);
+      for (var i = 0; i + 8 <= tail.length; i++) {
+        if (tail[i] == 0x66 && // f
+            tail[i + 1] == 0x74 && // t
+            tail[i + 2] == 0x79 && // y
+            tail[i + 3] == 0x70) {
+          return true; // 'ftyp'
+        }
+      }
+      return false;
+    } catch (_) {
+      return false;
+    } finally {
+      try {
+        await raf?.close();
+      } catch (_) {}
     }
   }
 
