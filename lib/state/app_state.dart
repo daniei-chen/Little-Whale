@@ -591,17 +591,22 @@ class AppState extends ChangeNotifier {
     );
 
     var ok = 0;
-    var fail = 0;
-    var lastMsg = '';
-    for (final o in outcomes) {
+    final failures = <String>[];
+    for (var slot = 0; slot < outcomes.length; slot++) {
+      final o = outcomes[slot];
       if (o == null) continue;
       if (o.saved) {
         ok++;
       } else {
-        fail++;
-        if (o.message.isNotEmpty) lastMsg = o.message;
+        // 【为什么要记「第几张」】图文作品一次存 9 张，失败 2 张时旧代码只报
+        // 「成功 7 张，失败 2 张」—— 用户不知道该重试哪几张，只能整条重来。
+        // 序号用原图序号（targets[slot] + 1），和保存出来的文件名 `标题_3` 对得上。
+        final idx = slot < targets.length ? targets[slot] + 1 : slot + 1;
+        final why = o.message.isEmpty ? '未知原因' : o.message;
+        failures.add('第 $idx 张：$why');
       }
     }
+    final fail = failures.length;
 
     downloading = false;
     downloadProgress = 0;
@@ -612,9 +617,28 @@ class AppState extends ChangeNotifier {
       return DownloadOutcome(saved: true, message: '已保存 $ok 张');
     }
     if (ok == 0) {
-      return DownloadOutcome(saved: false, message: lastMsg.isEmpty ? '保存失败' : lastMsg);
+      // 全失败时把前几条原因都带上，而不是只留最后一条
+      return DownloadOutcome(
+        saved: false,
+        message: '${ok + fail} 张全部失败 —— ${summarizeFailures(failures)}',
+      );
     }
-    return DownloadOutcome(saved: true, message: '成功 $ok 张，失败 $fail 张');
+    return DownloadOutcome(
+      saved: true,
+      message: '成功 $ok 张，失败 $fail 张 —— ${summarizeFailures(failures)}',
+    );
+  }
+
+  /// 失败明细摘要：最多两条，每条截断，避免 Toast 被撑爆
+  @visibleForTesting
+  static String summarizeFailures(List<String> failures) {
+    const maxShow = 2;
+    final shown = failures.take(maxShow).map((e) {
+      final one = e.replaceAll('\n', ' ').trim();
+      return one.length > 34 ? '${one.substring(0, 34)}…' : one;
+    }).join('；');
+    final more = failures.length > maxShow ? '（还有 ${failures.length - maxShow} 条）' : '';
+    return '$shown$more';
   }
 
   /* ---------------- 复制 ---------------- */
