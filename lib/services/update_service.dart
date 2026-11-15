@@ -80,22 +80,24 @@ class UpdateService {
     // 两个地址都没配就直接跳过（从仓库 clone 下来自己构建就是这种情况）
     if (kUpdateManifestUrl.isEmpty && kUpdateManifestUrlAlt.isEmpty) return null;
 
-    var info = kUpdateManifestUrl.isEmpty
-        ? null
-        : await _fetch(kUpdateManifestUrl);
+    // 【并行查两个源，取 build 较大的那个】
+    //
+    // 原来是串行：先问主源（jsDelivr），它没给出新版才问备用源（raw）。
+    // 这个策略依赖「主源足够新」，而实测它不成立：
+    //   v0.3.4 发布后，jsDelivr 的 `@latest` 仍返回 **v0.3.2** 的清单（滞后两个版本），
+    //   而 raw 已经是 v0.3.4。也就是说**大部分发版之后，串行逻辑都要多走一次请求**，
+    //   而 raw 在国内又时通时断 —— 最坏情况是「先等主源、再等一个很慢的备用源」。
+    //
+    // 并行之后：总耗时 = 两者里较快的那个，而且一次就能拿到最新。
+    // 代价是每次检查会多一个请求（两个都是几十字节的 JSON，可忽略）。
+    final futures = <Future<UpdateInfo?>>[];
+    if (kUpdateManifestUrl.isNotEmpty) futures.add(_fetch(kUpdateManifestUrl));
+    if (kUpdateManifestUrlAlt.isNotEmpty) futures.add(_fetch(kUpdateManifestUrlAlt));
 
-    // 【为什么主源没给出「有新版」时还要再试备用源】
-    // 主源走 jsDelivr（国内可直连），但它有 CDN 缓存 —— 发版后一段时间里
-    // 可能仍然返回旧清单，表现就是「明明发了新版，App 却说不更新」。
-    // 备用源是 GitHub raw，没有缓存但国内时通时断。两者互补：
-    // 只有主源没给出更新时才多请求一次备用源，正常情况不多花任何请求。
-    if (info == null || info.build <= kAppBuild) {
-      if (kUpdateManifestUrlAlt.isNotEmpty) {
-        final alt = await _fetch(kUpdateManifestUrlAlt);
-        if (alt != null && (info == null || alt.build > info.build)) {
-          info = alt;
-        }
-      }
+    UpdateInfo? info;
+    for (final r in await Future.wait(futures)) {
+      if (r == null) continue;
+      if (info == null || r.build > info.build) info = r;
     }
     if (info == null) return null;
 
