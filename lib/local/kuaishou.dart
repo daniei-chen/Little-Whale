@@ -135,6 +135,7 @@ class KuaishouLocalPlatform extends LocalPlatform {
       title: (r['title'] ?? '').toString(),
       author: (r['author'] ?? '').toString(),
       cover: images.isNotEmpty ? images.first.url : '',
+      durationSec: (r['durationSec'] as num?)?.toInt() ?? 0,
       videoUrl: videoUrl,
       referer: referer,
       images: images,
@@ -214,11 +215,26 @@ class KuaishouLocalPlatform extends LocalPlatform {
     }
   }
 
+  // ---- 视频时长 ----
+  // 优先读 <video>.duration（秒）。刚加载时可能是 NaN 或 Infinity，
+  // 所以用 isFinite 兜住；读不到再退回页面上的 `00:13` 形态文本。
+  var durationSec = 0;
+  var vdur = document.querySelector('video');
+  if (vdur && isFinite(vdur.duration) && vdur.duration > 0) {
+    durationSec = Math.round(vdur.duration);
+  }
+  if (!durationSec) {
+    var bodyTxt = document.body ? String(document.body.innerText || '').slice(0, 4000) : '';
+    var dm = bodyTxt.match(/(?:^|[\s>])(\d{1,2}):(\d{2})(?:[\s<]|$)/);
+    if (dm) durationSec = parseInt(dm[1], 10) * 60 + parseInt(dm[2], 10);
+  }
+
   return JSON.stringify({
     videoUrl: videoUrl,
     images: images,
     title: title,
-    author: author
+    author: author,
+    durationSec: durationSec
   });
 })()
 ''';

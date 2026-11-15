@@ -140,6 +140,7 @@ class ZhihuLocalPlatform extends LocalPlatform {
       title: (r['title'] ?? '').toString(),
       author: (r['author'] ?? '').toString(),
       cover: images.isNotEmpty ? images.first.url : '',
+      publishTime: (r['publishTime'] ?? '').toString(),
       videoUrl: videoUrl,
       referer: referer,
       images: images,
@@ -232,12 +233,26 @@ class ZhihuLocalPlatform extends LocalPlatform {
     if (s && s.indexOf('blob:') !== 0 && s.indexOf('http') === 0) videoUrl = String(s);
   }
 
+  // ---- 发布时间 ----
+  // 知乎正文上方有「发布于 2023-10-18」或「编辑于 …」；结构化数据里也有一份。
+  // 之前这一项一直是空的，历史记录卡片上就少了日期。
+  var publishTime = '';
+  var ptxt = document.body ? String(document.body.innerText || '').slice(0, 20000) : '';
+  var pdate = ptxt.match(/(?:发布于|编辑于|发表于)\s*(\d{4}-\d{2}-\d{2})/);
+  if (pdate) publishTime = pdate[1];
+  if (!publishTime) {
+    var pm = document.querySelector('meta[property="article:published_time"]') ||
+             document.querySelector('meta[itemprop="datePublished"]');
+    if (pm) publishTime = String(pm.getAttribute('content') || '').slice(0, 10);
+  }
+
   return JSON.stringify({
     href: href.slice(0, 160),
     title: title,
     author: author,
     images: images,
     videoUrl: videoUrl,
+    publishTime: publishTime,
     needLogin: false
   });
 })()

@@ -112,6 +112,15 @@ class BilibiliLocalPlatform extends LocalPlatform {
 
   /* ------------------------------------------------------------------ */
 
+  /// 专栏作者名。x/article/view 返回的 data.author 是**对象**（{mid, name, face…}），
+  /// 不是字符串 —— 早先按 data.author_name 取，那个字段根本不存在，所以作者一直是空的。
+  static String _articleAuthor(Map d) {
+    final a = d['author'];
+    if (a is Map) return (a['name'] ?? '').toString();
+    if (a is String) return a;
+    return (d['author_name'] ?? '').toString();
+  }
+
   /// 用户粘的如果是「非内容页」，给出针对性解释。
   static String? explainNonContentUrl(String url) {
     final u = url.toLowerCase();
@@ -312,7 +321,7 @@ class BilibiliLocalPlatform extends LocalPlatform {
           platformName: name,
           type: 'images',
           title: (d['title'] ?? '').toString(),
-          author: (d['author_name'] ?? '').toString(),
+          author: _articleAuthor(d),
           cover: fromPage.first.url,
           publishTime: _formatDate(d['publish_time'] ?? d['ctime']),
           referer: referer,
@@ -328,7 +337,7 @@ class BilibiliLocalPlatform extends LocalPlatform {
       platformName: name,
       type: 'images',
       title: (d['title'] ?? '').toString(),
-      author: (d['author_name'] ?? '').toString(),
+      author: _articleAuthor(d),
       cover: images.first.url,
       publishTime: _formatDate(d['publish_time'] ?? d['ctime']),
       referer: referer,
