@@ -128,6 +128,9 @@ class DouyinLocalPlatform extends LocalPlatform {
   Future<LocalResult> parse(String url) async {
     final link = await _resolveLink(url);
     if (link.awemeId.isEmpty) {
+      // 先看能不能说清「你粘的是哪种非作品页」—— 比笼统的「找不到作品号」有用得多
+      final explain = explainNonWorkUrl(url);
+      if (explain != null) throw LocalParseError(explain);
       throw const LocalParseError(
         '没在链接里找到抖音作品号。\n\n'
         '请确认复制的是「分享 → 复制链接」的完整内容（形如 '
@@ -770,6 +773,39 @@ class DouyinLocalPlatform extends LocalPlatform {
   }
 
   /// 从 URL（或一段文本）里认出作品号与内容形态
+  /// 用户粘的如果是「非作品页」，给出针对性解释。
+  ///
+  /// 【为什么值得单独写】抖音的分享入口不止一种：用户很容易从个人主页或合集里
+  /// 复制地址。这时笼统地说「没找到作品号」，用户只会觉得软件坏了；
+  /// 说清「这是用户主页，请点开具体视频再复制」，他才有可能自己解决。
+  static String? explainNonWorkUrl(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('/user/')) {
+      return '这是**抖音用户主页**，不是单个作品。\n\n'
+          '请在 App 里点开要保存的那条视频/图文，再「分享 → 复制链接」。';
+    }
+    if (u.contains('/collection/') || u.contains('/mix/')) {
+      return '这是**抖音合集/播放列表**，不是单个作品。\n\n'
+          '合集里每条视频要分别打开再复制链接 —— App 一次只处理一个作品。';
+    }
+    if (u.contains('/live')) {
+      return '这是**抖音直播间**。\n\n'
+          '直播是持续推流，没有「下载完成」这个状态，App 不支持保存直播。';
+    }
+    if (u.contains('/search/')) {
+      return '这是抖音的**搜索结果页**，不是作品。\n\n请点进具体视频再复制链接。';
+    }
+    if (u.contains('/discover') || u.contains('/recommend')) {
+      // 【带 modal_id 的发现页其实是有效作品链接】`_linkFromUrl` 会从 query 里
+      // 取到 modal_id；那种情况不该被当成「首页」来解释。
+      if (u.contains('modal_id=')) return null;
+      return '这是抖音的**首页/发现页**，不是单个作品。\n\n'
+          '请在 App 里点开具体视频，再「分享 → 复制链接」（形如 '
+          'https://v.douyin.com/xxxx/）。';
+    }
+    return null;
+  }
+
   DouyinLink _linkFromUrl(String s) {
     final m = _idInPath.firstMatch(s);
     if (m != null) {

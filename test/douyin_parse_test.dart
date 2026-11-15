@@ -13,6 +13,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flashsave/local/douyin.dart';
+import 'package:flashsave/local/xiaohongshu.dart';
 import 'package:flashsave/local/douyin_parse.dart';
 
 String _readFixture(String name) {
@@ -22,6 +24,67 @@ String _readFixture(String name) {
 }
 
 void main() {
+  group('小红书非笔记页也给出针对性提示', () {
+    String? explain(String u) => XiaohongshuLocalPlatform.explainNonNoteUrl(u);
+
+    test('用户主页', () {
+      expect(explain('https://www.xiaohongshu.com/user/profile/5f0a1b2c3d'), contains('用户主页'));
+    });
+
+    test('合辑', () {
+      expect(explain('https://www.xiaohongshu.com/board/abc123'), contains('合辑'));
+    });
+
+    test('搜索页', () {
+      expect(explain('https://www.xiaohongshu.com/search_result?keyword=x'), contains('搜索结果'));
+    });
+
+    test('商品页', () {
+      expect(explain('https://www.xiaohongshu.com/goods/123'), contains('商品'));
+    });
+
+    test('正常笔记链接不该被误判', () {
+      expect(explain('https://www.xiaohongshu.com/explore/65a1b2c3d4e5f6a7b8c9d0e1'), isNull);
+      expect(explain('https://xhslink.com/a/abc123'), isNull);
+    });
+  });
+  group('非作品页链接给出针对性提示（而不是笼统的「找不到作品号」）', () {
+    String? explain(String u) => DouyinLocalPlatform.explainNonWorkUrl(u);
+
+    test('用户主页', () {
+      expect(explain('https://www.douyin.com/user/MS4wLjABAAAAxyz'), contains('用户主页'));
+    });
+
+    test('合集 / 播放列表', () {
+      expect(explain('https://www.douyin.com/collection/7123456789'), contains('合集'));
+      expect(explain('https://www.douyin.com/mix/7123456789'), contains('合集'));
+    });
+
+    test('直播间', () {
+      expect(explain('https://live.douyin.com/123456'), contains('直播'));
+    });
+
+    test('搜索结果页', () {
+      expect(explain('https://www.douyin.com/search/%E5%A3%81%E7%BA%B8'), contains('搜索结果'));
+    });
+
+    test('首页 / 发现页（没有 modal_id）', () {
+      expect(explain('https://www.douyin.com/discover'), contains('首页'));
+      expect(explain('https://www.douyin.com/recommend'), contains('首页'));
+    });
+
+    test('带 modal_id 的发现页不算「非作品」', () {
+      // 这种链接 _linkFromUrl 能从 query 提取到作品号，不该被误报成首页
+      expect(explain('https://www.douyin.com/discover?modal_id=7682785097179364069'), isNull);
+    });
+
+    test('正常作品链接不该被误判', () {
+      expect(explain('https://www.douyin.com/video/7682785097179364069'), isNull);
+      expect(explain('https://www.douyin.com/note/7683036663006886479'), isNull);
+      expect(explain('https://v.douyin.com/dhQYBJNQZis/'), isNull);
+      expect(explain('https://www.iesdouyin.com/share/video/7682785097179364069/'), isNull);
+    });
+  });
   group('抖音 · _ROUTER_DATA（视频主入口）', () {
     late dynamic router;
 

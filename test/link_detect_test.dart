@@ -164,6 +164,23 @@ void main() {
       }
     });
 
+    test('两个表的 hosts 必须逐项一致', () {
+      // 【为什么这条重要】`kPlatforms` 决定界面上那句「已识别到 XX 链接」，
+      // `LocalRegistry` 决定真正能不能解析。两边不一致时，
+      // 用户会看到「识别到了」然后解析失败 —— 这是最伤体验的一种 bug。
+      // 实测就踩过：知乎的 `zhimg.com` 只在 kPlatforms 里，粘一张知乎图会
+      // 提示识别成功但解析说「不支持」。
+      for (final p in LocalRegistry.all) {
+        final meta = kPlatforms.where((m) => m.key == p.key).toList();
+        expect(meta.length, 1, reason: '${p.name} 在 kPlatforms 里条数不对');
+        final a = p.hosts.map((e) => e.toLowerCase()).toSet();
+        final b = meta.single.hosts.map((e) => e.toLowerCase()).toSet();
+        expect(a, b,
+            reason: '${p.name} 的 hosts 两边不一致：'
+                'LocalRegistry=${a.toList()}，kPlatforms=${b.toList()}');
+      }
+    });
+
     test('hosts 里不该出现内容 CDN 域名', () {
       // 这些是「图片/视频本体」的域名，粘进来不应该被当成作品页
       const cdnSuffixes = ['douyinpic.com', 'zhimg.com', 'hdslb.com', 'bilivideo.com', 'xhscdn.com'];

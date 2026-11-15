@@ -195,7 +195,11 @@ class LocalRegistry {
 
   /// 专用适配器的平台名（准确度高、能去水印的那些）
   static List<String> get coreNames => all
-      .where((e) => e is! GenericLocalPlatform)
+      // 【排除 hls】它不是「平台」，而是「一种媒体容器」：
+      // 没有固定域名、谈不上「能去水印」、也不该出现在「支持的平台」列表里。
+      // 不排掉它，`coreNames.length` 会从 6 变成 7，而那条断言守的是
+      // 「能去水印的平台正好这 6 个」—— 多出来的会让这个守门失效。
+      .where((e) => e is! GenericLocalPlatform && e.key != 'hls')
       .map((e) => e.name)
       .toList();
 

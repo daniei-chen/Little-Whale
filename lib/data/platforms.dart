@@ -34,8 +34,10 @@ const kPlatforms = <PlatformMeta>[
     short: '抖',
     color: Color(0xFF161823),
     soft: Color(0x12161823), // rgba(22,24,35,.07)
-    // 【不能写裸词 'douyin'】hosts 是子串匹配，裸词会把 douyinpic.com / douyin.com.evil 之类全吞进来。
-    hosts: ['v.douyin.com', 'www.iesdouyin.com', 'iesdouyin.com', 'douyin.com'],
+    // 与 LocalRegistry 保持逐项一致（有一致性测试盯着）。
+    // `douyin.com` 已经覆盖 `v.douyin.com` / `m.douyin.com`，
+    // `iesdouyin.com` 覆盖 `www.iesdouyin.com` —— 不必写全，写了反而两边对不上。
+    hosts: ['douyin.com', 'iesdouyin.com'],
     keywords: ['抖音', 'dou音'],
   ),
   PlatformMeta(
@@ -81,7 +83,7 @@ const kPlatforms = <PlatformMeta>[
     short: '知',
     color: Color(0xFF0084FF),
     soft: Color(0x120084FF),
-    hosts: ['zhihu.com', 'zhimg.com'],
+    hosts: ['zhihu.com'],
     keywords: ['知乎', 'zhihu'],
   ),
   // ---- 下面这些走「通用适配器」（见 lib/local/generic.dart）----

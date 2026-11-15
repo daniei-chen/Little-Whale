@@ -43,6 +43,38 @@ class XiaohongshuLocalPlatform extends LocalPlatform {
   static final _tokenRe = RegExp(r'xsec_token=([^&]+)');
   static final _sourceRe = RegExp(r'xsec_source=([^&]+)');
 
+  /// 用户粘的如果是「非笔记页」，给出针对性解释。
+  ///
+  /// 和抖音那边同样的道理：小红书的分享入口很多（个人主页、合辑、商品笔记），
+  /// 笼统说「没找到笔记号」用户只会觉得软件坏了。
+  static String? explainNonNoteUrl(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('/user/profile/')) {
+      return '这是**小红书用户主页**，不是单篇笔记。\n\n'
+          '请在 App 里点开具体笔记，再「分享 → 复制链接」。';
+    }
+    if (u.contains('/board/') || u.contains('/collection/')) {
+      return '这是**小红书合辑**，不是单篇笔记。\n\n合辑里每篇要分别打开再复制链接。';
+    }
+    if (u.contains('/search_result') || u.contains('/search/')) {
+      return '这是小红书的**搜索结果页**，不是笔记。\n\n请点进具体笔记再复制链接。';
+    }
+    if (u.contains('/goods/') || u.contains('/store/')) {
+      return '这是小红书**商品/店铺页**，不是笔记。\n\nApp 只处理图文笔记和视频笔记。';
+    }
+    if (u.contains('/explore') || u.contains('/discovery')) {
+      // 【带笔记 id 的 explore 是正常链接，不该被当成列表页】
+      // 小红书笔记 id 是 24 位十六进制（如 65a1b2c3d4e5f6a7b8c9d0e1）。
+      // 有这个格式就说明 noteId 会被提取到，这里必须放行。
+      if (RegExp(r'[0-9a-f]{24}', caseSensitive: false).hasMatch(url)) {
+        return null;
+      }
+      return '这个小红书地址里没有笔记号。\n\n'
+          '可能是首页或列表页 —— 请在 App 里点开具体笔记再复制链接。';
+    }
+    return null;
+  }
+
   /* ------------------------------------------------------------------ */
 
   @override
@@ -50,6 +82,10 @@ class XiaohongshuLocalPlatform extends LocalPlatform {
     final resolved = _unwrapLoginRedirect(await _resolve(url));
     final noteId = _extract(resolved, _idInPath);
     if (noteId == null) {
+      // 先分辨「粘的是非笔记页」还是「分享链接真的失效了」——
+      // 前者换个链接就能解决，后者只能重新分享一次。笼统报错会让用户白试。
+      final explain = explainNonNoteUrl(resolved);
+      if (explain != null) throw LocalParseError(explain);
       throw const LocalParseError(
           '没在链接里找到小红书笔记号。这条分享链接可能已经过期，重新复制一次试试。');
     }
