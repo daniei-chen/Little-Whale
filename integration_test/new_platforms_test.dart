@@ -15,6 +15,7 @@ import 'package:integration_test/integration_test.dart';
 
 import 'package:flashsave/local/engine.dart';
 import 'package:flashsave/local/registry.dart';
+import 'package:flashsave/services/download_service.dart';
 
 Future<void> mountEngine(WidgetTester tester) async {
   await tester.pumpWidget(const MaterialApp(home: Scaffold(body: LocalEngineHost())));
@@ -43,6 +44,40 @@ void main() {
       // ignore: avoid_print
       print('[新平台] 识别 4/4 通过');
     });
+
+    testWidgets('皮皮虾真实作品：能拿到可下载的视频地址', (tester) async {
+      await mountEngine(tester);
+      // 真实分享短链（"没想到我也被安排上了"）
+      const url = 'https://h5.pipix.com/s/e161t2B/';
+      final platform = LocalRegistry.detect(url);
+      expect(platform, isNotNull);
+      expect(platform!.key, 'pipix');
+
+      final r = await platform.parse(url);
+      // ignore: avoid_print
+      print('[皮皮虾] type=${r.type} title="${r.title}" '
+          'video=${r.videoUrl.length > 80 ? r.videoUrl.substring(0, 80) : r.videoUrl}');
+      expect(r.type, 'video', reason: '这是视频作品，不该判成图文');
+      expect(r.videoUrl.startsWith('http'), isTrue);
+      expect(r.videoUrl.contains('.m3u8'), isFalse, reason: '不能把播放列表当视频');
+    }, timeout: const Timeout(Duration(minutes: 4)));
+
+    testWidgets('皮皮虾视频：真的能下载并写进相册', (tester) async {
+      await mountEngine(tester);
+      const url = 'https://h5.pipix.com/s/e161t2B/';
+      final r = await LocalRegistry.detect(url)!.parse(url);
+      expect(r.videoUrl.startsWith('http'), isTrue);
+
+      final outcome = await DownloadService.instance.fetchAndSave(
+        proxyUrl: r.videoUrl,
+        isVideo: true,
+        referer: r.referer,
+        fileHint: 'e2e_pipix',
+      );
+      // ignore: avoid_print
+      print('[皮皮虾-保存] saved=${outcome.saved} msg=${outcome.message}');
+      expect(outcome.saved, isTrue, reason: '保存失败: ${outcome.message}');
+    }, timeout: const Timeout(Duration(minutes: 6)));
 
     testWidgets('AcFun 真实作品：要么拿到可下载地址，要么明确说「HLS 流不支持」', (tester) async {
       await mountEngine(tester);

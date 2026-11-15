@@ -33,6 +33,7 @@ class GenericLocalPlatform extends LocalPlatform {
     this.settle = const Duration(milliseconds: 900),
     this.timeout = const Duration(seconds: 16),
     this.failHint = '',
+    this.expectVideo = false,
   });
 
   @override
@@ -71,6 +72,14 @@ class GenericLocalPlatform extends LocalPlatform {
   /// 既不知道是谁的问题，也不知道该不该再试。
   final String failHint;
 
+  /// 这个平台的作品**一定是视频**（已知）。
+  ///
+  /// 实测 AcFun：播放器要 5 秒以上才把 src 挂上来，在那之前页面已经有
+  /// 十几张缩略图 —— 「图 >= 2 就收工」会把它判成图文，同一链接这次报 HLS、
+  /// 下次报「图文 11 张」，行为不稳定。标了 expectVideo 就**先等播放器**，
+  /// 等不到再按 HLS/没有内容来解释。
+  final bool expectVideo;
+
   @override
   Future<LocalResult> parse(String url) async {
     final engine = LocalEngine.instance;
@@ -103,6 +112,14 @@ class GenericLocalPlatform extends LocalPlatform {
 
         // 有可下载的视频地址就够（最强信号，不用再等）
         if (video.isNotEmpty) return true;
+
+        // 【已知是视频站 → 先把播放器等出来】
+        // AcFun 实测：同一链接有时 1.8 秒报「图文」、有时 5 秒报「HLS」——
+        // 因为播放器的 src 挂上来之前，页面已经有十几张缩略图。
+        // 这类平台先等 6 秒，等不到再按 HLS / 没有内容来解释，行为才稳定。
+        if (expectVideo) {
+          return DateTime.now().difference(t0) > const Duration(seconds: 6);
+        }
 
         // 【有播放器但还没拿到地址 → 再等一小会儿】
         // 实测（AcFun 作品页）：播放器起来之前，页面已经有 11 张缩略图
@@ -148,6 +165,15 @@ class GenericLocalPlatform extends LocalPlatform {
       }
     }
 
+    // 【已知是视频站 → 拿不到视频就是拿不到，别拿缩略图充数】
+    // AcFun 实测：播放器没起来时页面有十几张缩略图，如果按「有图就是图文」
+    // 返回，用户会存到一堆封面和推荐位。这个站的作品只有视频这一种形态，
+    // 所以明确报「拿不到可下载的视频」并带上平台特有的原因。
+    if (expectVideo && videoUrl.isEmpty) {
+      throw LocalParseError(
+          '$name 这条作品没拿到可下载的视频地址。\n\n'
+          '${failHint.isNotEmpty ? failHint : '可能是播放器还没加载出来，稍后重试一次。'}');
+    }
     // 【流式视频优先判定】页面只有 m3u8 时，那些 <img> 多半是封面、推荐位缩略图。
     // 实测 AcFun 作品页：videoUrl 为空、images 抓到 11 张（全是缩略图），
     // 于是被判成「图文 11 张」—— 用户点保存会存下一堆不相干的图。

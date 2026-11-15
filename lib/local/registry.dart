@@ -135,14 +135,20 @@ class LocalRegistry {
       // 实测（2026-11，真实作品页 ac41234567）：播放器给的是
       // ...-hls_1080p_h264_60_1.m3u8，是分段流不是文件。
       failHint: 'AcFun 的视频是 HLS 流式格式（m3u8 分段流），App 暂不支持直接保存。',
+      // 播放器要 5 秒以上才挂 src，不标这个会时好时坏地判成图文
+      expectVideo: true,
     ),
     GenericLocalPlatform(
       key: 'pipix',
       name: '皮皮虾',
       hosts: const ['pipix.com'],
       referer: 'https://h5.pipix.com/',
-      // 实测：h5.pipix.com 是 APP 下载落地页，没有作品内容
-      failHint: '皮皮虾的网页版是 APP 下载引导页，作品内容只在 App 里。',
+      // 【实测更正】上一版我只看过首页 `h5.pipix.com`（那是 APP 下载引导页），
+      // 就写下"作品只在 App 里"——**这个判断是错的**。
+      // 真实作品页 `h5.pipix.com/s/xxx/` 是正常渲染的：
+      //   <video src="https://v26-cdn-tos.ppxvod.com/.../video/tos/cn/...">
+      // 实测该地址 Range 请求返回 206 video/mp4、文件头 ftyp isom —— 能直接下载。
+      // 所以这里不需要 failHint，正常走通用提取。
     ),
     GenericLocalPlatform(
       key: 'izuiyou',
