@@ -283,10 +283,73 @@ class GenericLocalPlatform extends LocalPlatform {
   out.title = title.replace(/\s+/g, ' ').slice(0, 100);
 
   // ---- 作者 ----
+  //
+  // 【为什么不能只靠 authorSelector】那个要平台配置，而 16 个通用平台里
+  // 大多数没配（也配不准 —— 各站的作者节点 class 名完全不同）。
+  // 实测皮皮虾的作品页作者是空的，但页面上明明写着「超爱吃芋泥～」。
+  // 这里按可靠度依次找：配置的选择器 → `meta author` → 带 `/user/` 的链接
+  // → `@` 开头的叶节点（B站/抖音/皮皮虾这类站都这么展示作者）。
+  function metaOf2(p) {
+    var el = document.querySelector('meta[property="' + p + '"]') ||
+             document.querySelector('meta[name="' + p + '"]');
+    return el ? String(el.getAttribute('content') || '').trim() : '';
+  }
+
   var author = '';
   if (typeof __as !== 'undefined') {
     var ae = document.querySelector(__as);
     if (ae) author = String(ae.textContent || '').trim();
+  }
+  if (!author || author.length > 40) {
+    author = metaOf2('author') || metaOf2('article:author') || '';
+  }
+  if (!author || author.length > 40) {
+    // 指向用户主页的链接，文本通常就是昵称
+    var uls = document.querySelectorAll('a[href*="/user/"], a[href*="/profile/"], a[href*="/u/"]');
+    for (var ai = 0; ai < uls.length; ai++) {
+      var a = uls[ai];
+      if ((a.getAttribute('href') || '').indexOf('self') > -1) continue;
+      var tx = String(a.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!tx || tx.length > 40) continue;
+      if (!(a.offsetWidth || a.offsetHeight || a.getClientRects().length)) continue;
+      author = tx;
+      break;
+    }
+  }
+  if (!author || author.length > 40) {
+    // `@昵称` 形态
+    var els = document.querySelectorAll('span, div, a, p, strong');
+    for (var zi = 0; zi < els.length; zi++) {
+      var el2 = els[zi];
+      if (el2.children.length > 0) continue;
+      var s3 = String(el2.textContent || '').replace(/\s+/g, ' ').trim();
+      if (s3.length < 2 || s3.length > 30) continue;
+      if (s3.charAt(0) !== '@') continue;
+      if (!(el2.offsetWidth || el2.offsetHeight)) continue;
+      author = s3.replace(/^@/, '').trim();
+      break;
+    }
+  }
+  if (!author || author.length > 40) {
+    // 最后一招：class/data 属性里带 author / user / nickname 的元素。
+    // 实测皮皮虾的作品页，昵称就是这样一个节点（既不在 <a href="/user/"> 里、
+    // 也不带 @ 前缀），前面几级都抓不到。
+    // 加严格过滤，避免抓到「作者推荐」「相关用户」这类标签文字。
+    var cands = document.querySelectorAll(
+      '[data-author], [data-nickname], [class*="author" i], [class*="nickname" i], [class*="user-name" i], [class*="userName" i]'
+    );
+    for (var ci = 0; ci < cands.length; ci++) {
+      var c = cands[ci];
+      if (c.children.length > 0) continue;
+      var t4 = String(c.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t4.length < 2 || t4.length > 24) continue;
+      if (!(c.offsetWidth || c.offsetHeight)) continue;
+      // 过滤明显的标签/按钮文案
+      if (/^(作者|关注|已关注|粉丝|关注作者|作者推荐|更多|展开|收起|举报|分享)$/.test(t4)) continue;
+      if (/^(作者|关注|粉丝|推荐|相关)/.test(t4)) continue;
+      author = t4;
+      break;
+    }
   }
   out.author = author.slice(0, 40);
 
@@ -348,6 +411,17 @@ class GenericLocalPlatform extends LocalPlatform {
     imgs.push({ url: src, width: el.naturalWidth || 0, height: el.naturalHeight || 0 });
   }
   out.images = imgs;
+
+  // ---- 封面兜底 ----
+  // `<video poster>` 为空时（很多站根本不写这个属性）退到 og:image 或首图，
+  // 否则历史记录卡片会是一块空白。实测皮皮虾的作品页就是这种：有视频、有封面
+  // 大图，但 poster 属性是空的。
+  if (!out.cover) {
+    var ogi = '';
+    try { ogi = metaOf2('og:image'); } catch (e) {}
+    if (ogi && ogi.indexOf('http') === 0) out.cover = ogi;
+  }
+  if (!out.cover && imgs.length > 0) out.cover = imgs[0].url;
 
   return JSON.stringify(out);
 })()
