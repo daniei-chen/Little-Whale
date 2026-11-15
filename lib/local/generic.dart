@@ -212,6 +212,10 @@ class GenericLocalPlatform extends LocalPlatform {
     final allow = (imageAllow ?? const <String>[]).map((e) => "'$e'").join(',');
     final vs = videoSelector == null ? '' : "var __vs = '$videoSelector';";
     final ts = titleSelector == null ? '' : "var __ts = '$titleSelector';";
+    // 平台展示名（用于「标题全是站点名」时生成中性占位，如「微视视频」）。
+    // 必须像 __ts 一样自己带引号 —— 上一版我写成了 `''' + name + r'''`，
+    // raw 字符串不会补引号，生成出来是 `var __sn = 微视;`，整个探针脚本直接语法错误。
+    final sn = "var __sn = '${name.replaceAll(RegExp(r"['\\]"), '')}';";
     final as = authorSelector == null ? '' : "var __as = '$authorSelector';";
 
     return r'''
@@ -238,7 +242,11 @@ class GenericLocalPlatform extends LocalPlatform {
     return el ? String(el.getAttribute('content') || '').trim() : '';
   }
   // 站点标语的特征词（不是作品标题）
-  var SITE_NOISE = /(在线观看|海量正版|高清完整|官方网站|视频网站|轻松有收获|正版高清|免费在线|首页_|_首页)/;
+  // 【站点名清单】这些词出现在标题里，说明拿到的是「站点名」而不是作品名。
+  // 实测微视的作品页：h1 / og:title 全是「腾讯微视」，直接显示给用户就是
+  // 一条叫「腾讯微视」的视频 —— 比没有标题还糟。
+  ''' + sn + r'''
+  var SITE_NOISE = /(在线观看|海量正版|高清完整|官方网站|视频网站|轻松有收获|正版高清|免费在线|首页_|_首页|腾讯微视|微视|西瓜视频|今日头条|好看视频|虎牙直播|斗鱼直播|爱奇艺|优酷|腾讯视频|芒果TV|秒拍|最右|皮皮虾|AcFun|哔哩哔哩|bilibili)/i;
 
   var title = '';
   if (typeof __ts !== 'undefined') {
@@ -280,6 +288,19 @@ class GenericLocalPlatform extends LocalPlatform {
   }
 
   title = title.replace(/\s*[-_|｜]\s*[^-_|｜]{1,12}\s*$/, '').trim();
+  // 【全链条都命中站点名时的兜底】说明这个页面既没有可用的 h1、og:title 也是
+  // 站点名、description 也带站点词。与其把「腾讯微视」当成作品名显示，不如
+  // 用一个中性占位 —— 用户至少知道「没抓到标题」，而不是以为作品就叫这个名字。
+  if (!title || SITE_NOISE.test(title) || title.length < 4) {
+    var brand = '';
+    try {
+      var host = String(location.hostname || '').replace(/^www\./, '');
+      var parts = host.split('.');
+      brand = parts.length >= 2 ? parts[parts.length - 2] : host;
+    } catch (e) { brand = ''; }
+    var siteLabel = (typeof __sn !== 'undefined' && __sn) ? __sn : (brand || '该站点');
+    title = siteLabel + '视频';
+  }
   out.title = title.replace(/\s+/g, ' ').slice(0, 100);
 
   // ---- 作者 ----

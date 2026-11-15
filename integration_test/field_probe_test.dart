@@ -35,6 +35,14 @@ const _cases = <String, String>{
   '知乎专栏': 'https://zhuanlan.zhihu.com/p/28852607',
   '快手': 'https://v.kuaishou.com/JjikGmiZ',
   '皮皮虾': 'https://h5.pipix.com/s/e161t2B/',
+  // ---- v0.3.8 扩展：验证「通用适配器五级兜底」在别的站是不是也成立 ----
+  '微视': 'https://m.weishi.qq.com/vise/share/index.html?id=7uGrjEwX31SArzQgQ',
+  '豆瓣': 'https://m.douban.com/note/96071389/',
+  'AcFun': 'https://www.acfun.cn/v/ac41234567',
+  '秒拍': 'https://www.miaopai.com/show/AhCIqOP7YeVtbz7S0ERyBsMqjzyYCQ6LJtLUuQ__.htm',
+  // 西瓜 / 头条 / 好看 / 最右 / 虎牙 / 斗鱼 / 腾讯视频 / 爱奇艺 / 优酷 / 芒果TV
+  // 这几家要么是 SPA 首页、要么是直播站、要么是 DRM 长视频，公开渠道拿不到
+  // 能稳定复现的作品直链 —— 不硬凑，留空比编一个假链接诚实。
 };
 
 void _report(String name, LocalResult r) {
